@@ -34,6 +34,8 @@ logging:
     # Silence "Broken pipe" qui spamme à chaque déconnexion SSE (comportement normal)
     "[org.apache.catalina.core.ContainerBase.[Catalina].[localhost].[/].[dispatcherServlet]]": OFF
     org.springframework.web.servlet.handler.HandlerExceptionResolver: ERROR
+    # Silence "Failure in @ExceptionHandler" pour les broken pipes SSE (cf GlobalExceptionHandler)
+    "[org.springframework.web.servlet.mvc.method.annotation.ExceptionHandlerExceptionResolver]": ERROR
 
 kidzpos:
   jwt:

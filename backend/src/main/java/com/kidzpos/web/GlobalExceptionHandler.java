@@ -9,9 +9,11 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.AuthenticationCredentialsNotFoundException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.servlet.NoHandlerFoundException;
 
+import java.io.IOException;
 import java.util.Map;
 import java.util.NoSuchElementException;
 
@@ -54,6 +56,18 @@ public class GlobalExceptionHandler {
         // Spring Security gère déjà ces cas via le filter chain, mais ce handler couvre
         // les cas où l'exception remonte jusqu'au contrôleur (rare).
         return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Accès refusé"));
+    }
+
+    /**
+     * Broken pipe / client abort — typique des SSE quand un client ferme l'onglet.
+     * On ne peut PAS écrire de body JSON ici car la réponse est en text/event-stream
+     * (déclencherait HttpMessageNotWritableException). Retour void = laisse Spring
+     * fermer proprement la réponse async.
+     */
+    @ExceptionHandler(IOException.class)
+    @ResponseStatus(HttpStatus.OK)
+    public void handleClientDisconnect(IOException e) {
+        log.debug("Client disconnect (broken pipe / aborted): {}", e.getMessage());
     }
 
     @ExceptionHandler(Exception.class)

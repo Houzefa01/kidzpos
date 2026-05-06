@@ -18,7 +18,9 @@ public class Sale {
     @Column(nullable = false) private String userId;
     @Column(nullable = false) private String userName;
 
-    @OneToMany(mappedBy = "sale", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.EAGER)
+    // B4 : LAZY + @EntityGraph sur les listings (cf SaleRepository) pour éviter le N+1.
+    // open-in-view: false ⇒ les items sont chargés explicitement via le fetch plan.
+    @OneToMany(mappedBy = "sale", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
     @JsonManagedReference
     @Builder.Default
     private List<SaleItem> items = new ArrayList<>();

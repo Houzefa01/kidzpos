@@ -25,12 +25,16 @@ export function currencySymbol(): string {
   return useSettings.getState().settings.currency === "AR" ? "Ar" : "€";
 }
 
-/** Hook : se ré-évalue quand la devise ou le taux changent. */
-import { useEffect, useState } from "react";
+/**
+ * Hook : se ré-évalue automatiquement quand la devise ou le taux changent.
+ * M6 : pas de useState/useEffect — les sélecteurs Zustand suffisent à déclencher
+ * le re-render du composant appelant. La closure capturée utilise les valeurs courantes.
+ */
 export function useFormatMoney() {
   const currency = useSettings((s) => s.settings.currency);
   const rate = useExchange((s) => s.rate);
-  const [, force] = useState(0);
-  useEffect(() => { force((n) => n + 1); }, [currency, rate]);
-  return (amountEur: number) => formatMoney(amountEur);
+  return (amountEur: number) => {
+    if (currency === "AR") return `${fmtAr.format(Math.round(amountEur * rate))} Ar`;
+    return `${fmtEur.format(amountEur)} €`;
+  };
 }

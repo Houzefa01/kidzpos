@@ -28,7 +28,7 @@ Convention : `[ ]` à faire · `[x]` fait + commit hash.
 - [x] **2.1** B4 🔴 `Sale.items` LAZY + `@EntityGraph` — `Sale.java`, `SaleRepository.java`
 - [x] **2.2** I1 🟠 `@RestControllerAdvice` global — nouveau `GlobalExceptionHandler.java`
 - [x] **2.3** I2 🟠 `AuthPrincipal.name` + Sale.userName — `JwtAuthFilter.java`, `SaleController.java`
-- [ ] **2.4** I8-BE 🟠 `CheckoutReq.clientSaleId` + idempotence — `Dtos.java`, `SaleController.java`
+- [x] **2.4** I8-BE 🟠 `CheckoutReq.clientSaleId` + idempotence — `Dtos.java`, `SaleController.java`
 - [ ] **2.5** I7-BE 🟠 URL `open.er-api.com` — `ExchangeController.java`
 
 ## Phase 3 — Frontend : couche réseau (2 items)

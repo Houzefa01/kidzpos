@@ -53,6 +53,12 @@ public class SaleController {
 
     @PostMapping("/checkout")
     public ResponseEntity<?> checkout(@Valid @RequestBody CheckoutReq req, @AuthenticationPrincipal AuthPrincipal me) {
+        // I8 : idempotence — si le client a déjà reçu une réponse pour ce clientSaleId
+        // (cas du replay outbox après reconnexion), renvoyer la vente existante.
+        if (req.clientSaleId() != null && !req.clientSaleId().isBlank()) {
+            var existing = sales.findById(req.clientSaleId());
+            if (existing.isPresent()) return ResponseEntity.ok(existing.get());
+        }
         return runWithSeqRetry(() -> tx.execute(status -> doCheckout(req, me)));
     }
 
@@ -109,7 +115,11 @@ public class SaleController {
         int pointsEarned = (int) Math.floor(total * s.getPointsPerEuro());
 
         long seq = sales.findMaxSeqByStoreId(req.storeId()).orElse(0L) + 1;
-        String saleId = "sale-" + UUID.randomUUID();
+        // I8 : si le client a fourni un clientSaleId, on l'utilise comme ID de vente
+        // (permet la traçabilité front ↔ back et l'idempotence du checkout).
+        String saleId = (req.clientSaleId() != null && !req.clientSaleId().isBlank())
+                ? req.clientSaleId()
+                : "sale-" + UUID.randomUUID();
 
         Sale sale = Sale.builder()
                 .id(saleId).seq(seq)

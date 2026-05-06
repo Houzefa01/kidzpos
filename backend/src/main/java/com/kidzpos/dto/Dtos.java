@@ -40,6 +40,10 @@ public class Dtos {
 
     public record CheckoutReq(
             @NotBlank String storeId,
+            // I8 : ID local optionnel pour l'idempotence offline → flush outbox.
+            // Si fourni et déjà connu côté serveur, le checkout retourne la vente existante
+            // au lieu d'en créer une nouvelle (évite duplication après reconnexion).
+            String clientSaleId,
             @NotEmpty List<SaleItemReq> items,
             @PositiveOrZero double discount,        // en € (montant absolu après calcul UI)
             @NotNull PaymentMode paymentMode,

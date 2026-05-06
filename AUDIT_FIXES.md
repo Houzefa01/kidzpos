@@ -14,7 +14,7 @@ Convention : `[ ]` à faire · `[x]` fait + commit hash.
 - [x] **1.7** I4 🟠 `CustomerController` `@Valid` — `CustomerController.java`
 - [x] **1.8** I5 🟠 Refund idempotent — `SaleRepository.java`, `SaleController.java`
 - [x] **1.9** I9 🟠 CORS HTTPS par défaut — `application.yml`
-- [ ] **1.10** M1 🟡 `JwtAuthFilter` log debug — `JwtAuthFilter.java`
+- [x] **1.10** M1 🟡 `JwtAuthFilter` log debug — `JwtAuthFilter.java`
 - [ ] **1.11** M2 🟡 `DataInitializer` ne log pas les passwords — `DataInitializer.java`
 - [ ] **1.12** M4 🟡 `/api/exchange/**` authenticated — `SecurityConfig.java`
 - [ ] **1.13** M8 🟡 `SettingsReq` borné `<= 100` — `Dtos.java`

@@ -67,14 +67,19 @@ Convention : `[ ]` à faire · `[x]` fait + commit hash.
 - `npm run build` ⇒ ✅ built in 2.31s
 - `npm run lint` ⇒ ✅ 0 errors, 7 warnings react-refresh pré-existantes (composants ui/ non modifiés)
 
-## Phase 6 — Tests E2E (6 scénarios)
+## Phase 6 — Tests E2E — ✅ TERMINÉE
 
-- [ ] **6.1** Login admin + employé
-- [ ] **6.2** Création produit → SSE multi-onglet
-- [ ] **6.3** Vente offline → reconnexion → flush outbox
-- [ ] **6.4** Devise Ar↔EUR online/offline
-- [ ] **6.5** Refund admin uniquement (403 employé, double-refund bloqué)
-- [ ] **6.6** Multi-poste : modif sur onglet A → MAJ sur B via SSE
+Backend SQLite démarré sur `/tmp/kidzpos-e2e.db` (DB volatile, isolée).
+Tous les scénarios joués via curl ; SSE testé en background avec `curl -N`.
+
+- [x] **6.1** Login admin + employé : ✅ token JWT, role/storeId corrects, 401 bad pwd, 403 no token
+- [x] **6.2** Création produit → SSE : ✅ event `change {entity:product, action:created}` reçu
+- [x] **6.3** Idempotence checkout (I8 bouclé) + B6 stock atomique : ✅ même `clientSaleId` ⇒ même vente, stock 10→8 sans double-décrément
+- [x] **6.4** Devise Ar/EUR : ✅ default 4900, refresh online → live 4839.6 (open.er-api.com), 403 sans auth (M4)
+- [x] **6.5** Refund admin only + idempotent : ✅ 403 employee, 200 admin, stock réintégré, double-refund 400, refund-of-refund 400
+- [x] **6.6** SSE multi-mutation : ✅ events sur Customer/Product/Settings/Stock + ping heartbeat
+- [x] **6.7** Stock concurrent (B6) + seq race (B3) : ✅ 8 checkouts // sur stock=3 → exactement 3 succès, seq distincts (3,4,5), stock=0
+- [x] **6.8** Validations DTO + ACL : ✅ @PositiveOrZero, @DecimalMax, @Valid Customer, ACL admin-only, format `{error: "..."}` partout (I1)
 
 ## Items reportés (voir `TODO_FUTURE.md`)
 

@@ -7,7 +7,7 @@ import com.kidzpos.repo.CustomerRepository;
 import com.kidzpos.security.JwtAuthFilter.AuthPrincipal;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.core.Authentication;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.Instant;
@@ -41,7 +41,8 @@ public class CustomerController {
     }
 
     @PutMapping("/{id}")
-    public ResponseEntity<?> update(@PathVariable String id, @Valid @RequestBody CustomerReq r, Authentication auth) {
+    public ResponseEntity<?> update(@PathVariable String id, @Valid @RequestBody CustomerReq r,
+                                    @AuthenticationPrincipal AuthPrincipal me) {
         var c = repo.findById(id).orElse(null);
         if (c == null) return ResponseEntity.notFound().build();
         if (r.name() != null) c.setName(r.name());
@@ -49,7 +50,6 @@ public class CustomerController {
         if (r.email() != null) c.setEmail(r.email());
         // I3 : édition des points fidélité réservée à l'admin (anti-fraude employé).
         if (r.points() != null) {
-            AuthPrincipal me = (AuthPrincipal) auth.getPrincipal();
             if (!"ADMIN".equals(me.role())) {
                 return ResponseEntity.status(403).body(Map.of("error", "Édition des points réservée à l'admin"));
             }

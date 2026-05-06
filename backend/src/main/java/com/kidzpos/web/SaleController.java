@@ -7,7 +7,7 @@ import com.kidzpos.security.JwtAuthFilter.AuthPrincipal;
 import jakarta.validation.Valid;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.core.Authentication;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.bind.annotation.*;
@@ -52,8 +52,7 @@ public class SaleController {
     }
 
     @PostMapping("/checkout")
-    public ResponseEntity<?> checkout(@Valid @RequestBody CheckoutReq req, Authentication auth) {
-        AuthPrincipal me = (AuthPrincipal) auth.getPrincipal();
+    public ResponseEntity<?> checkout(@Valid @RequestBody CheckoutReq req, @AuthenticationPrincipal AuthPrincipal me) {
         return runWithSeqRetry(() -> tx.execute(status -> doCheckout(req, me)));
     }
 
@@ -163,8 +162,7 @@ public class SaleController {
     }
 
     @PostMapping("/refund")
-    public ResponseEntity<?> refund(@Valid @RequestBody RefundReq req, Authentication auth) {
-        AuthPrincipal me = (AuthPrincipal) auth.getPrincipal();
+    public ResponseEntity<?> refund(@Valid @RequestBody RefundReq req, @AuthenticationPrincipal AuthPrincipal me) {
         if (!"ADMIN".equals(me.role())) return ResponseEntity.status(403).body(Map.of("error", "Admin requis"));
         return runWithSeqRetry(() -> tx.execute(status -> doRefund(req, me)));
     }

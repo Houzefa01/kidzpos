@@ -9,7 +9,7 @@ import com.kidzpos.repo.StockMovementRepository;
 import com.kidzpos.security.JwtAuthFilter.AuthPrincipal;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.core.Authentication;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
@@ -36,8 +36,7 @@ public class StockController {
 
     @PostMapping("/adjust")
     @Transactional
-    public ResponseEntity<?> adjust(@Valid @RequestBody StockAdjustReq r, Authentication auth) {
-        AuthPrincipal me = (AuthPrincipal) auth.getPrincipal();
+    public ResponseEntity<?> adjust(@Valid @RequestBody StockAdjustReq r, @AuthenticationPrincipal AuthPrincipal me) {
         var p = products.findById(r.productId()).orElse(null);
         if (p == null) return ResponseEntity.notFound().build();
         int newStock = p.getStock() + r.delta();
@@ -55,8 +54,7 @@ public class StockController {
 
     @PostMapping("/transfer")
     @Transactional
-    public ResponseEntity<?> transfer(@Valid @RequestBody TransferReq r, Authentication auth) {
-        AuthPrincipal me = (AuthPrincipal) auth.getPrincipal();
+    public ResponseEntity<?> transfer(@Valid @RequestBody TransferReq r, @AuthenticationPrincipal AuthPrincipal me) {
         if (!"ADMIN".equals(me.role())) return ResponseEntity.status(403).body(Map.of("error", "Admin requis"));
         var src = products.findById(r.productId()).orElse(null);
         if (src == null) return ResponseEntity.notFound().build();

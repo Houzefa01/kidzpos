@@ -18,7 +18,7 @@ Convention : `[ ]` à faire · `[x]` fait + commit hash.
 - [x] **1.11** M2 🟡 `DataInitializer` ne log pas les passwords — `DataInitializer.java`
 - [x] **1.12** M4 🟡 `/api/exchange/**` authenticated — `SecurityConfig.java`
 - [x] **1.13** M8 🟡 `SettingsReq` borné `<= 100` — `Dtos.java`
-- [ ] **1.14** M10 🟡 `@AuthenticationPrincipal` partout — `SaleController.java`, `StockController.java`
+- [x] **1.14** M10 🟡 `@AuthenticationPrincipal` partout — `SaleController.java`, `StockController.java`, `CustomerController.java`
 
 ## Phase 2 — Backend : API & contrats (5 items)
 

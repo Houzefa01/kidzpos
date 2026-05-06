@@ -89,6 +89,20 @@ public class SaleController {
             }
         }
 
+        // B5 : redeem possible uniquement si client identifié + points effectivement détenus
+        if (req.pointsRedeemed() > 0) {
+            if (req.customerId() == null) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Client requis pour utiliser des points"));
+            }
+            var c = customers.findById(req.customerId()).orElse(null);
+            if (c == null) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Client introuvable"));
+            }
+            if (req.pointsRedeemed() > c.getPoints()) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Points insuffisants"));
+            }
+        }
+
         double pointsValue = req.pointsRedeemed() * s.getEuroPerPoint();
         double afterDiscount = Math.max(0, subtotal - discount - pointsValue);
         double tax = afterDiscount * s.getTaxRate() / 100.0;

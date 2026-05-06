@@ -45,7 +45,7 @@ public class Dtos {
             @NotNull PaymentMode paymentMode,
             Double amountPaid,
             String customerId,
-            int pointsRedeemed
+            @PositiveOrZero int pointsRedeemed
     ) {}
 
     public record RefundReq(@NotBlank String saleId) {}

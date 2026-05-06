@@ -8,7 +8,8 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
-@Entity @Table(name = "sales")
+@Entity @Table(name = "sales",
+    uniqueConstraints = @UniqueConstraint(name = "uk_sale_store_seq", columnNames = {"storeId", "seq"}))
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class Sale {
     @Id private String id;

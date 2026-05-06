@@ -5,9 +5,11 @@ import com.kidzpos.dto.Dtos.*;
 import com.kidzpos.repo.*;
 import com.kidzpos.security.JwtAuthFilter.AuthPrincipal;
 import jakarta.validation.Valid;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.Instant;
@@ -18,19 +20,25 @@ import java.util.UUID;
 @RequestMapping("/api/sales")
 public class SaleController {
 
+    /** Retry sur collision uk_sale_store_seq (concurrence checkout/refund parallèle). */
+    private static final int SEQ_RETRY_MAX = 5;
+
     private final SaleRepository sales;
     private final ProductRepository products;
     private final CustomerRepository customers;
     private final SettingsRepository settingsRepo;
     private final StockMovementRepository moves;
     private final com.kidzpos.events.EventBus bus;
+    private final TransactionTemplate tx;
 
     public SaleController(SaleRepository sales, ProductRepository products,
                           CustomerRepository customers, SettingsRepository settingsRepo,
-                          StockMovementRepository moves, com.kidzpos.events.EventBus bus) {
+                          StockMovementRepository moves, com.kidzpos.events.EventBus bus,
+                          PlatformTransactionManager txm) {
         this.sales = sales; this.products = products;
         this.customers = customers; this.settingsRepo = settingsRepo;
         this.moves = moves; this.bus = bus;
+        this.tx = new TransactionTemplate(txm);
     }
 
     @GetMapping
@@ -44,15 +52,13 @@ public class SaleController {
     }
 
     @PostMapping("/checkout")
-    @Transactional
     public ResponseEntity<?> checkout(@Valid @RequestBody CheckoutReq req, Authentication auth) {
         AuthPrincipal me = (AuthPrincipal) auth.getPrincipal();
-        Settings s = settingsRepo.findById(1L).orElseThrow();
+        return runWithSeqRetry(() -> tx.execute(status -> doCheckout(req, me)));
+    }
 
-        // Plafond remise pour employés
-        if (!"ADMIN".equals(me.role()) && req.discount() > 0) {
-            // discount en € — on calcule % vs subtotal après
-        }
+    private ResponseEntity<?> doCheckout(CheckoutReq req, AuthPrincipal me) {
+        Settings s = settingsRepo.findById(1L).orElseThrow();
 
         // Charger produits + valider stock
         Map<String, Product> prodMap = new HashMap<>();
@@ -131,17 +137,22 @@ public class SaleController {
             });
         }
 
-        var saved = sales.save(sale);
+        // saveAndFlush : déclenche la contrainte uk_sale_store_seq dans cette transaction
+        // (sans flush, l'erreur surviendrait au commit, hors du try/catch du retry).
+        var saved = sales.saveAndFlush(sale);
         bus.publish("sale", "created", saved);
         bus.publish("product", "bulkUpdated", null);
         return ResponseEntity.ok(saved);
     }
 
     @PostMapping("/refund")
-    @Transactional
     public ResponseEntity<?> refund(@Valid @RequestBody RefundReq req, Authentication auth) {
         AuthPrincipal me = (AuthPrincipal) auth.getPrincipal();
         if (!"ADMIN".equals(me.role())) return ResponseEntity.status(403).body(Map.of("error", "Admin requis"));
+        return runWithSeqRetry(() -> tx.execute(status -> doRefund(req, me)));
+    }
+
+    private ResponseEntity<?> doRefund(RefundReq req, AuthPrincipal me) {
         var orig = sales.findById(req.saleId()).orElse(null);
         if (orig == null) return ResponseEntity.notFound().build();
 
@@ -174,10 +185,28 @@ public class SaleController {
                         .relatedSaleId(id).build());
             });
         }
-        var saved = sales.save(refund);
+        var saved = sales.saveAndFlush(refund);
         bus.publish("sale", "refunded", saved);
         bus.publish("product", "bulkUpdated", null);
         return ResponseEntity.ok(saved);
+    }
+
+    /**
+     * Exécute une opération retournant ResponseEntity, avec retry sur DataIntegrityViolationException
+     * (typiquement collision uk_sale_store_seq sous concurrence).
+     */
+    private ResponseEntity<?> runWithSeqRetry(java.util.function.Supplier<ResponseEntity<?>> op) {
+        for (int attempt = 0; attempt < SEQ_RETRY_MAX; attempt++) {
+            try {
+                return op.get();
+            } catch (DataIntegrityViolationException e) {
+                if (attempt == SEQ_RETRY_MAX - 1) {
+                    return ResponseEntity.status(409).body(Map.of("error", "Conflit numérotation, réessayez"));
+                }
+                // retry : la prochaine itération relit MAX(seq) dans une nouvelle transaction
+            }
+        }
+        return ResponseEntity.status(409).body(Map.of("error", "Conflit numérotation"));
     }
 
     private static double round(double v) { return Math.round(v * 100.0) / 100.0; }

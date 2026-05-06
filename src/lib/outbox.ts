@@ -29,6 +29,8 @@ const OutboxEntrySchema = z.object({
 });
 
 const KEY = "kidzpos-outbox";
+/** I6 : plafond pour éviter la saturation localStorage après plusieurs jours offline. */
+const MAX_ENTRIES = 500;
 
 function read(): OutboxEntry[] {
   try {
@@ -45,13 +47,23 @@ export const outbox = {
   list: () => read(),
   size: () => read().length,
   enqueue(entry: Omit<OutboxEntry, "id" | "ts" | "retries">) {
-    const all = read();
+    let all = read();
+    // I6 : dédoublonnage par `ref` pour PUT et DELETE — un nouvel update/delete remplace
+    // les précédents pour la même ressource (évite N PUT redondants pour un seul produit).
+    // POST n'est PAS dédupliqué : chaque vente / création client est une mutation distincte.
+    if (entry.ref && (entry.method === "PUT" || entry.method === "DELETE")) {
+      all = all.filter((e) => !(e.ref === entry.ref && (e.method === "PUT" || e.method === "DELETE")));
+    }
     all.push({
       ...entry,
       id: `ob-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       ts: Date.now(),
       retries: 0,
     });
+    // I6 : FIFO bounded — on garde les MAX_ENTRIES plus récentes.
+    if (all.length > MAX_ENTRIES) {
+      all = all.slice(-MAX_ENTRIES);
+    }
     write(all);
   },
   remove(id: string) {

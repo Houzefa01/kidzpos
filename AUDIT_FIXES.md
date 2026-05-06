@@ -35,7 +35,7 @@ Convention : `[ ]` à faire · `[x]` fait + commit hash.
 
 ## Phase 3 — Frontend : couche réseau (2 items)
 
-- [ ] **3.1** I6 🟠 Outbox dédoublonnage + plafond — `outbox.ts`
+- [x] **3.1** I6 🟠 Outbox dédoublonnage + plafond — `outbox.ts`
 - [ ] **3.2** M7 🟡 Pas de password clair en outbox — `auth.ts`
 
 ## Phase 4 — Frontend : stores Zustand (1 item)

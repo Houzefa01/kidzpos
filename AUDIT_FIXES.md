@@ -43,9 +43,11 @@ Convention : `[ ]` à faire · `[x]` fait + commit hash.
 - `npm run build` ⇒ ✅ built in 2.80s, dist/ OK.
 - `npm run lint` ⇒ 0 errors, 7 warnings pré-existantes (react-refresh sur composants ui/).
 
-## Phase 4 — Frontend : stores Zustand (1 item)
+## Phase 4 — Frontend : stores Zustand (1 item) — ✅ TERMINÉE
 
-- [x] **4.1** I8-FE 🟠 `clientSaleId` dans payload checkout — `data.ts`
+- [x] **4.1** I8-FE 🟠 `clientSaleId` dans payload checkout — `f3704e2`
+
+**Validation** : `tsc --noEmit` ⇒ 12 erreurs pré-existantes (0 régression). `npm run build` ⇒ ✅ built in 2.23s.
 
 ## Phase 5 — Frontend : UI & UX (2 items)
 

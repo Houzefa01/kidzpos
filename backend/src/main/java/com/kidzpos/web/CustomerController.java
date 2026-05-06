@@ -5,6 +5,7 @@ import com.kidzpos.dto.Dtos.CustomerReq;
 import com.kidzpos.events.EventBus;
 import com.kidzpos.repo.CustomerRepository;
 import com.kidzpos.security.JwtAuthFilter.AuthPrincipal;
+import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
@@ -22,7 +23,12 @@ public class CustomerController {
 
     @GetMapping public List<Customer> list() { return repo.findAll(); }
 
-    @PostMapping public Customer create(@RequestBody CustomerReq r) {
+    @PostMapping
+    public ResponseEntity<?> create(@Valid @RequestBody CustomerReq r) {
+        // I4 : un client doit avoir au moins un nom OU un téléphone (validation métier).
+        if (isBlank(r.name()) && isBlank(r.phone())) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Nom ou téléphone requis"));
+        }
         var c = repo.save(Customer.builder()
                 .id(r.id() != null ? r.id() : "c" + System.currentTimeMillis())
                 .name(r.name()).phone(r.phone()).email(r.email())
@@ -31,11 +37,11 @@ public class CustomerController {
                 .createdAt(Instant.now())
                 .build());
         bus.publish("customer", "created", c);
-        return c;
+        return ResponseEntity.ok(c);
     }
 
     @PutMapping("/{id}")
-    public ResponseEntity<?> update(@PathVariable String id, @RequestBody CustomerReq r, Authentication auth) {
+    public ResponseEntity<?> update(@PathVariable String id, @Valid @RequestBody CustomerReq r, Authentication auth) {
         var c = repo.findById(id).orElse(null);
         if (c == null) return ResponseEntity.notFound().build();
         if (r.name() != null) c.setName(r.name());
@@ -58,4 +64,6 @@ public class CustomerController {
         repo.deleteById(id);
         bus.publish("customer", "deleted", Map.of("id", id));
     }
+
+    private static boolean isBlank(String s) { return s == null || s.isBlank(); }
 }

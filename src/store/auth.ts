@@ -128,6 +128,11 @@ export const useAuth = create<AuthState>()(
           return { ok: false, error: "Email déjà utilisé" };
         }
         if (!password || password.length < 4) return { ok: false, error: "Mot de passe trop court (4 min)" };
+        // M7 : interdire la création offline — sinon le password en clair attendrait dans l'outbox
+        // (localStorage = vulnérable XSS) et le user créé localement n'existerait jamais côté serveur.
+        if (!useBackend.getState().lanReachable) {
+          return { ok: false, error: "Connexion serveur requise pour créer un utilisateur" };
+        }
         const hashed = await hashPassword(password);
         const newUser = { ...u, email, id: `u${Date.now()}` };
         set((s) => ({
@@ -189,6 +194,12 @@ export const useAuth = create<AuthState>()(
         return { ok: true };
       },
       setPassword: async (email, password) => {
+        // M7 : interdire le changement de mot de passe offline.
+        // Le hash local serait dépassé si le serveur reçoit un autre password plus tard,
+        // et le password en clair traînerait dans l'outbox jusqu'au flush.
+        if (!useBackend.getState().lanReachable) {
+          throw new Error("Connexion serveur requise pour changer le mot de passe");
+        }
         const hashed = await hashPassword(password);
         const e = email.toLowerCase();
         set((s) => ({ passwords: { ...s.passwords, [e]: hashed } }));

@@ -128,11 +128,14 @@ public class SaleController {
 
         for (var i : items) { i.setSale(sale); sale.getItems().add(i); }
 
-        // Décrémente stock + journal
+        // Décrémente stock atomiquement (B6) + journal
         for (var it : req.items()) {
             Product p = prodMap.get(it.productId());
-            p.setStock(p.getStock() - it.quantity());
-            products.save(p);
+            int updated = products.decrementStockIfAvailable(p.getId(), it.quantity());
+            if (updated == 0) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Stock insuffisant (concurrence): " + p.getName()));
+            }
+            p.setStock(p.getStock() - it.quantity()); // sync l'objet en mémoire pour la réponse JSON
             moves.save(StockMovement.builder()
                     .productId(p.getId()).storeId(p.getStoreId())
                     .type(MovementType.SALE).quantity(-it.quantity())

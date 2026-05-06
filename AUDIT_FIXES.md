@@ -9,7 +9,7 @@ Convention : `[ ]` à faire · `[x]` fait + commit hash.
 - [x] **1.2** B2 🔴 Migration Flyway V1 : schéma complet — `V1__Initial_schema.sql`
 - [x] **1.3** B3 🔴 `Sale.seq` unique constraint + retry — `Sale.java`, `SaleController.java`
 - [x] **1.4** B5 🔴 `pointsRedeemed @PositiveOrZero` + plafond — `Dtos.java`, `SaleController.java`
-- [ ] **1.5** B6 🔴 Stock concurrent atomique — `ProductRepository.java`, `SaleController.java`
+- [x] **1.5** B6 🔴 Stock concurrent atomique — `ProductRepository.java`, `SaleController.java`
 - [ ] **1.6** I3 🟠 DELETE customers/products + PUT/DELETE stores ADMIN-only — `SecurityConfig.java`
 - [ ] **1.7** I4 🟠 `CustomerController` `@Valid` — `CustomerController.java`
 - [ ] **1.8** I5 🟠 Refund idempotent — `SaleRepository.java`, `SaleController.java`

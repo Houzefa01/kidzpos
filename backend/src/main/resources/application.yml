@@ -81,7 +81,7 @@ spring:
       mode: never
   jpa:
     hibernate:
-      ddl-auto: create  # Recréer le schéma complet au démarrage (dev local)
+      ddl-auto: update  # Conserve les données entre redémarrages (mono-poste prod LAN)
     properties:
       hibernate:
         dialect: org.hibernate.community.dialect.SQLiteDialect

@@ -12,7 +12,7 @@ Convention : `[ ]` à faire · `[x]` fait + commit hash.
 - [x] **1.5** B6 🔴 Stock concurrent atomique — `ProductRepository.java`, `SaleController.java`
 - [x] **1.6** I3 🟠 DELETE customers/products + PUT/DELETE stores ADMIN-only — `SecurityConfig.java`, `CustomerController.java`
 - [x] **1.7** I4 🟠 `CustomerController` `@Valid` — `CustomerController.java`
-- [ ] **1.8** I5 🟠 Refund idempotent — `SaleRepository.java`, `SaleController.java`
+- [x] **1.8** I5 🟠 Refund idempotent — `SaleRepository.java`, `SaleController.java`
 - [ ] **1.9** I9 🟠 CORS HTTPS par défaut — `application.yml`
 - [ ] **1.10** M1 🟡 `JwtAuthFilter` log debug — `JwtAuthFilter.java`
 - [ ] **1.11** M2 🟡 `DataInitializer` ne log pas les passwords — `DataInitializer.java`

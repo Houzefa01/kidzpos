@@ -172,6 +172,13 @@ public class SaleController {
     private ResponseEntity<?> doRefund(RefundReq req, AuthPrincipal me) {
         var orig = sales.findById(req.saleId()).orElse(null);
         if (orig == null) return ResponseEntity.notFound().build();
+        // I5 : refund idempotent — bloquer double-remboursement et refund-d'un-refund
+        if (orig.getRefundedFrom() != null) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Une vente d'avoir ne peut être remboursée"));
+        }
+        if (sales.existsByRefundedFrom(orig.getId())) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Vente déjà remboursée"));
+        }
 
         long seq = sales.findMaxSeqByStoreId(orig.getStoreId()).orElse(0L) + 1;
         String id = "ref-" + UUID.randomUUID();

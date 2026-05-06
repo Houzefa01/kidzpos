@@ -14,4 +14,7 @@ public interface SaleRepository extends JpaRepository<Sale, String> {
 
     @Query("SELECT MAX(s.seq) FROM Sale s WHERE s.storeId = :storeId")
     Optional<Long> findMaxSeqByStoreId(@Param("storeId") String storeId);
+
+    /** I5 : détection rapide d'un refund existant pour bloquer le double-remboursement. */
+    boolean existsByRefundedFrom(String saleId);
 }

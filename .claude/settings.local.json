@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run *)",
+      "Bash(npx tsc *)",
+      "Bash(npx vite *)",
+      "Bash(echo \"PID vite: $!\")",
+      "Bash(java -version)",
+      "Bash(pkill -f \"kidzpos-backend\")",
+      "Bash(pkill -f \"vite\")",
+      "Bash(awk '{print $1}')",
+      "Bash(ip addr *)",
+      "Bash(awk '{print $2}')",
+      "Bash(curl -s http://localhost:8080/actuator/health)",
+      "Bash(curl -s -X POST http://localhost:8080/api/auth/login -H \"Content-Type: application/json\" -d '{\"email\":\"admin@kidzpos.com\",\"password\":\"admin123\"}')",
+      "Bash(echo \"Frontend PID: $!\")",
+      "Bash(mvn package *)",
+      "Bash(curl -s --max-time 35 --retry 10 --retry-delay 3 --retry-connrefused http://localhost:8080/actuator/health)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('LOGIN OK — user:', d['user']['name'], '| role:', d['user']['role']\\)\")",
+      "Bash(java -jar /home/Hsavatra/Bureau/sync-till-genius-main/backend/target/kidzpos-backend-1.0.0.jar --server.address=0.0.0.0 --spring.jpa.hibernate.ddl-auto=create)",
+      "Bash(echo \"Backend PID: $!\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('LOGIN OK — utilisateur:', d['user']['name'], '| rôle:', d['user']['role']\\)\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('SETTINGS OK — taxRate:', d.get\\('taxRate'\\), '| shopName:', d.get\\('shopName'\\)\\)\")",
+      "Bash(sudo ufw *)",
+      "Bash(iptables -L INPUT -n)"
+    ]
+  }
+}

@@ -1,0 +1,144 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* === KIDZPOS Design System ===
+   Dark SaaS POS aesthetic. All colors HSL.
+*/
+
+@layer base {
+  :root {
+    --background: 230 25% 7%;
+    --foreground: 220 15% 95%;
+
+    --card: 230 22% 10%;
+    --card-foreground: 220 15% 95%;
+
+    --popover: 230 25% 9%;
+    --popover-foreground: 220 15% 95%;
+
+    --primary: 265 85% 65%;
+    --primary-foreground: 0 0% 100%;
+    --primary-glow: 280 90% 70%;
+
+    --secondary: 230 18% 16%;
+    --secondary-foreground: 220 15% 95%;
+
+    --muted: 230 18% 14%;
+    --muted-foreground: 220 10% 60%;
+
+    --accent: 190 95% 55%;
+    --accent-foreground: 230 25% 7%;
+
+    --success: 150 70% 50%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 38 95% 60%;
+    --warning-foreground: 230 25% 7%;
+
+    --destructive: 0 75% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 230 18% 18%;
+    --input: 230 18% 16%;
+    --ring: 265 85% 65%;
+
+    --radius: 0.75rem;
+
+    --gradient-primary: linear-gradient(135deg, hsl(265 85% 65%), hsl(280 90% 70%));
+    --gradient-accent: linear-gradient(135deg, hsl(190 95% 55%), hsl(220 90% 60%));
+    --gradient-card: linear-gradient(180deg, hsl(230 22% 11%), hsl(230 22% 9%));
+    --gradient-hero: radial-gradient(ellipse at top, hsl(265 85% 25% / 0.4), transparent 60%);
+
+    --shadow-glow: 0 0 40px hsl(265 85% 65% / 0.35);
+    --shadow-card: 0 4px 24px -8px hsl(230 50% 2% / 0.6);
+    --shadow-elevated: 0 20px 50px -20px hsl(265 85% 30% / 0.5);
+
+    --sidebar-background: 230 28% 6%;
+    --sidebar-foreground: 220 12% 75%;
+    --sidebar-primary: 265 85% 65%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 230 22% 12%;
+    --sidebar-accent-foreground: 220 15% 95%;
+    --sidebar-border: 230 18% 14%;
+    --sidebar-ring: 265 85% 65%;
+  }
+
+  .light {
+    --background: 220 25% 98%;
+    --foreground: 230 25% 12%;
+    --card: 0 0% 100%;
+    --card-foreground: 230 25% 12%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 230 25% 12%;
+    --primary: 265 85% 55%;
+    --primary-foreground: 0 0% 100%;
+    --primary-glow: 280 90% 65%;
+    --secondary: 220 20% 94%;
+    --secondary-foreground: 230 25% 12%;
+    --muted: 220 20% 94%;
+    --muted-foreground: 230 10% 40%;
+    --accent: 190 95% 45%;
+    --accent-foreground: 0 0% 100%;
+    --success: 150 65% 40%;
+    --warning: 38 95% 50%;
+    --warning-foreground: 0 0% 100%;
+    --destructive: 0 75% 50%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 220 15% 88%;
+    --input: 220 15% 92%;
+    --ring: 265 85% 55%;
+    --gradient-card: linear-gradient(180deg, hsl(0 0% 100%), hsl(220 20% 97%));
+    --gradient-hero: radial-gradient(ellipse at top, hsl(265 85% 90% / 0.4), transparent 60%);
+    --shadow-card: 0 4px 24px -8px hsl(230 20% 50% / 0.15);
+    --sidebar-background: 220 25% 96%;
+    --sidebar-foreground: 230 15% 30%;
+    --sidebar-primary: 265 85% 55%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 220 20% 92%;
+    --sidebar-accent-foreground: 230 25% 12%;
+    --sidebar-border: 220 15% 88%;
+    --sidebar-ring: 265 85% 55%;
+  }
+}
+
+@layer base {
+  * { @apply border-border; }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1, "ss01" 1;
+    background-image: var(--gradient-hero);
+    background-attachment: fixed;
+  }
+}
+
+@layer utilities {
+  .gradient-primary { background: var(--gradient-primary); }
+  .gradient-accent { background: var(--gradient-accent); }
+  .gradient-card { background: var(--gradient-card); }
+  .text-gradient {
+    background: var(--gradient-primary);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .shadow-glow { box-shadow: var(--shadow-glow); }
+  .shadow-card { box-shadow: var(--shadow-card); }
+  .shadow-elevated { box-shadow: var(--shadow-elevated); }
+}
+
+@media print {
+  body * { visibility: hidden !important; }
+  .print-receipt, .print-receipt * { visibility: visible !important; }
+  .print-receipt {
+    position: fixed !important;
+    inset: 0 !important;
+    background: white !important;
+    color: black !important;
+    padding: 16px !important;
+    width: 80mm !important;
+    font-family: monospace !important;
+    font-size: 11px !important;
+  }
+  .no-print { display: none !important; }
+}

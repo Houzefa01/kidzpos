@@ -1,0 +1,41 @@
+package com.kidzpos.domain;
+
+import com.fasterxml.jackson.annotation.JsonManagedReference;
+import jakarta.persistence.*;
+import lombok.*;
+
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+
+@Entity @Table(name = "sales")
+@Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
+public class Sale {
+    @Id private String id;
+    @Column(nullable = false) private long seq;
+    @Column(nullable = false) private String storeId;
+    @Column(nullable = false) private String userId;
+    @Column(nullable = false) private String userName;
+
+    @OneToMany(mappedBy = "sale", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.EAGER)
+    @JsonManagedReference
+    @Builder.Default
+    private List<SaleItem> items = new ArrayList<>();
+
+    @Column(nullable = false) private double subtotal;
+    @Column(nullable = false) private double tax;
+    @Column(nullable = false) private double taxRate;
+    @Column(nullable = false) private double discount;
+    @Column(nullable = false) private double total;
+    @Column(nullable = false) private Instant date;
+
+    private String customerId;
+    private String customerName;
+    @Column(nullable = false) private int pointsEarned;
+    @Column(nullable = false) private int pointsRedeemed;
+
+    @Enumerated(EnumType.STRING) @Column(nullable = false) private PaymentMode paymentMode;
+    private Double amountPaid;
+    private Double change;
+    private String refundedFrom;
+}

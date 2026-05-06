@@ -1,0 +1,443 @@
+import { useMemo, useState } from "react";
+import { useAuth } from "@/store/auth";
+import { useData, Product, StockMove } from "@/store/data";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { CategoryCombobox } from "@/components/CategoryCombobox";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { Plus, Pencil, Trash2, Search, ArrowUp, ArrowDown, ArrowUpDown, Upload, ArrowLeftRight, PackagePlus } from "lucide-react";
+import { toast } from "sonner";
+import { ProductCsvRowSchema } from "@/lib/schemas";
+import { useFormatMoney } from "@/lib/money";
+
+type SortKey = "name" | "sku" | "category" | "price" | "stock" | "createdAt";
+type SortDir = "asc" | "desc";
+
+export default function Stock() {
+  const { user } = useAuth();
+  const fmt = useFormatMoney();
+  const { products, stores, moves, addProduct, updateProduct, deleteProduct, adjustStock, transferStock, bulkImportProducts } = useData();
+  const isAdmin = user?.role === "ADMIN";
+
+  const [search, setSearch] = useState("");
+  const [filterStore, setFilterStore] = useState<string>(isAdmin ? "all" : (user?.storeId ?? "all"));
+  const [filterCategory, setFilterCategory] = useState<string>("all");
+  const [stockFilter, setStockFilter] = useState<"all" | "low" | "out">("all");
+  const [sortKey, setSortKey] = useState<SortKey>("name");
+  const [sortDir, setSortDir] = useState<SortDir>("asc");
+  const [editing, setEditing] = useState<Product | null>(null);
+  const [open, setOpen] = useState(false);
+  const [adjustOpen, setAdjustOpen] = useState<Product | null>(null);
+  const [transferOpen, setTransferOpen] = useState<Product | null>(null);
+
+  const allCategories = useMemo(() => {
+    const s = new Set<string>();
+    products.forEach((p) => p.category && s.add(p.category));
+    return Array.from(s).sort();
+  }, [products]);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const list = products.filter((p) => {
+      if (!isAdmin && p.storeId !== user?.storeId) return false;
+      if (filterStore !== "all" && p.storeId !== filterStore) return false;
+      if (filterCategory !== "all" && (p.category ?? "") !== filterCategory) return false;
+      if (stockFilter === "low" && (p.stock === 0 || p.stock > 3)) return false;
+      if (stockFilter === "out" && p.stock !== 0) return false;
+      if (q && !`${p.name} ${p.sku} ${p.category ?? ""}`.toLowerCase().includes(q)) return false;
+      return true;
+    });
+    const dir = sortDir === "asc" ? 1 : -1;
+    list.sort((a, b) => {
+      const av = (a[sortKey] ?? "") as string | number;
+      const bv = (b[sortKey] ?? "") as string | number;
+      if (typeof av === "number" && typeof bv === "number") return (av - bv) * dir;
+      return String(av).localeCompare(String(bv), "fr") * dir;
+    });
+    return list;
+  }, [products, search, filterStore, filterCategory, stockFilter, isAdmin, user, sortKey, sortDir]);
+
+  const scopedMoves = useMemo(
+    () => isAdmin ? moves : moves.filter((m) => m.storeId === user?.storeId),
+    [moves, isAdmin, user]
+  );
+
+  const toggleSort = (k: SortKey) => {
+    if (sortKey === k) setSortDir(sortDir === "asc" ? "desc" : "asc");
+    else { setSortKey(k); setSortDir("asc"); }
+  };
+
+  const SortHeader = ({ k, label, align = "left" }: { k: SortKey; label: string; align?: "left" | "right" }) => (
+    <button onClick={() => toggleSort(k)} className={`flex w-full items-center gap-1 ${align === "right" ? "justify-end" : ""} hover:text-primary`}>
+      {label}
+      {sortKey === k ? (sortDir === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />) : <ArrowUpDown className="h-3 w-3 opacity-40" />}
+    </button>
+  );
+
+  const onSave = (form: Omit<Product, "id" | "createdAt">) => {
+    if (editing) {
+      const dup = products.find((p) => p.id !== editing.id && p.storeId === form.storeId && p.sku.toLowerCase() === form.sku.toLowerCase());
+      if (dup) { toast.error("SKU déjà utilisé dans ce magasin"); return; }
+      updateProduct(editing.id, form);
+      toast.success("Produit mis à jour");
+    } else {
+      const res = addProduct(form);
+      if (!res.ok) { toast.error(res.error ?? "Erreur"); return; }
+      toast.success("Produit ajouté");
+    }
+    setOpen(false);
+    setEditing(null);
+  };
+
+  const onCsvImport = (file: File) => {
+    if (file.size > 2_000_000) { toast.error("Fichier trop volumineux (max 2 Mo)"); return; }
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const text = String(reader.result);
+        const lines = text.split(/\r?\n/).filter((l) => l.trim());
+        if (lines.length < 2) return toast.error("CSV vide");
+        if (lines.length > 10_000) return toast.error("CSV trop volumineux (max 10 000 lignes)");
+        const headers = lines[0].split(/[,;]/).map((h) => h.trim().toLowerCase().replace(/^"|"$/g, ""));
+        const rows: ReturnType<typeof ProductCsvRowSchema.parse>[] = [];
+        const errors: string[] = [];
+        for (let i = 1; i < lines.length; i++) {
+          const cells = lines[i].split(/[,;]/).map((c) => c.trim().replace(/^"|"$/g, "").replace(/[<>]/g, ""));
+          const obj: Record<string, string> = {};
+          headers.forEach((h, idx) => { obj[h] = cells[idx] ?? ""; });
+          const parsed = ProductCsvRowSchema.safeParse(obj);
+          if (!parsed.success) errors.push(`Ligne ${i + 1}: ${parsed.error.issues[0].message}`);
+          else rows.push(parsed.data);
+        }
+        if (errors.length && !rows.length) {
+          toast.error(`Import échoué : ${errors[0]}`);
+          return;
+        }
+        const res = bulkImportProducts(rows);
+        toast.success(`${res.added} ajoutés, ${res.skipped} ignorés (doublons)${errors.length ? `, ${errors.length} erreurs` : ""}`);
+      } catch (e: unknown) {
+        toast.error(`Erreur CSV : ${e instanceof Error ? e.message : "Fichier invalide"}`);
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="font-display text-3xl font-bold">Stock & Produits</h1>
+          <p className="text-sm text-muted-foreground">{filtered.length} produit(s) affiché(s)</p>
+        </div>
+        {isAdmin && (
+          <div className="flex gap-2">
+            <label>
+              <input type="file" accept=".csv" className="hidden"
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) onCsvImport(f); e.target.value = ""; }} />
+              <Button variant="outline" asChild><span><Upload className="mr-2 h-4 w-4" /> Import CSV</span></Button>
+            </label>
+            <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) setEditing(null); }}>
+              <DialogTrigger asChild>
+                <Button className="gradient-primary text-primary-foreground hover:opacity-90">
+                  <Plus className="mr-2 h-4 w-4" /> Nouveau produit
+                </Button>
+              </DialogTrigger>
+              <ProductDialog editing={editing} onSave={onSave} stores={stores} categories={allCategories} />
+            </Dialog>
+          </div>
+        )}
+      </div>
+
+      <Tabs defaultValue="list">
+        <TabsList>
+          <TabsTrigger value="list">Produits</TabsTrigger>
+          <TabsTrigger value="moves">Mouvements ({scopedMoves.length})</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="list" className="space-y-4">
+          <Card className="gradient-card border-border p-4">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="relative lg:col-span-2">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Rechercher nom, référence, catégorie..." className="pl-9" />
+              </div>
+              {isAdmin && (
+                <Select value={filterStore} onValueChange={setFilterStore}>
+                  <SelectTrigger><SelectValue placeholder="Magasin" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Tous les magasins</SelectItem>
+                    {stores.map((s) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              )}
+              <Select value={filterCategory} onValueChange={setFilterCategory}>
+                <SelectTrigger><SelectValue placeholder="Catégorie" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Toutes catégories</SelectItem>
+                  {allCategories.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Select value={stockFilter} onValueChange={(v: "all" | "low" | "out") => setStockFilter(v)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Tout stock</SelectItem>
+                  <SelectItem value="low">Stock faible (≤3)</SelectItem>
+                  <SelectItem value="out">Rupture</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </Card>
+
+          <Card className="gradient-card border-border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead><SortHeader k="name" label="Produit" /></TableHead>
+                  <TableHead><SortHeader k="sku" label="Référence" /></TableHead>
+                  <TableHead><SortHeader k="category" label="Catégorie" /></TableHead>
+                  <TableHead>Magasin</TableHead>
+                  <TableHead className="text-right"><SortHeader k="price" label="Prix" align="right" /></TableHead>
+                  <TableHead className="text-right"><SortHeader k="stock" label="Stock" align="right" /></TableHead>
+                  {isAdmin && <TableHead className="w-32" />}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filtered.map((p) => {
+                  const store = stores.find((s) => s.id === p.storeId);
+                  return (
+                    <TableRow key={p.id}>
+                      <TableCell className="font-medium">{p.name}</TableCell>
+                      <TableCell className="font-mono text-xs text-muted-foreground">{p.sku}</TableCell>
+                      <TableCell>{p.category ? <Badge variant="outline">{p.category}</Badge> : <span className="text-xs text-muted-foreground">—</span>}</TableCell>
+                      <TableCell className="text-xs">{store?.name.split("—")[0]}</TableCell>
+                      <TableCell className="text-right font-mono">{fmt(p.price)}</TableCell>
+                      <TableCell className="text-right">
+                        <button onClick={() => isAdmin && setAdjustOpen(p)} disabled={!isAdmin} title={isAdmin ? "Cliquer pour ajuster" : ""}>
+                          <Badge variant={p.stock === 0 ? "destructive" : p.stock <= 3 ? "secondary" : "outline"}
+                            className={p.stock <= 3 && p.stock > 0 ? "border-warning/50 text-warning" : ""}>
+                            {p.stock}
+                          </Badge>
+                        </button>
+                      </TableCell>
+                      {isAdmin && (
+                        <TableCell>
+                          <div className="flex justify-end gap-1">
+                            <Button size="icon" variant="ghost" title="Ajuster stock" onClick={() => setAdjustOpen(p)}><PackagePlus className="h-4 w-4" /></Button>
+                            <Button size="icon" variant="ghost" title="Transférer" onClick={() => setTransferOpen(p)}><ArrowLeftRight className="h-4 w-4" /></Button>
+                            <Button size="icon" variant="ghost" title="Modifier" onClick={() => { setEditing(p); setOpen(true); }}><Pencil className="h-4 w-4" /></Button>
+                            <ConfirmDialog
+                              trigger={<Button size="icon" variant="ghost" title="Supprimer"><Trash2 className="h-4 w-4 text-destructive" /></Button>}
+                              title={`Supprimer "${p.name}" ?`}
+                              description="Le produit sera définitivement retiré. Les ventes passées restent intactes."
+                              destructive
+                              onConfirm={() => { deleteProduct(p.id); toast.success("Supprimé"); }}
+                            />
+                          </div>
+                        </TableCell>
+                      )}
+                    </TableRow>
+                  );
+                })}
+                {filtered.length === 0 && (
+                  <TableRow><TableCell colSpan={7} className="py-8 text-center text-sm text-muted-foreground">Aucun produit.</TableCell></TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="moves">
+          <Card className="gradient-card border-border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Date</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Produit</TableHead>
+                  <TableHead>Magasin</TableHead>
+                  <TableHead className="text-right">Quantité</TableHead>
+                  <TableHead>Motif</TableHead>
+                  <TableHead>Par</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {scopedMoves.slice(0, 200).map((m) => <MoveRow key={m.id} m={m} stores={stores} />)}
+                {scopedMoves.length === 0 && (
+                  <TableRow><TableCell colSpan={7} className="py-8 text-center text-sm text-muted-foreground">Aucun mouvement.</TableCell></TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </Card>
+        </TabsContent>
+      </Tabs>
+
+      {adjustOpen && (
+        <AdjustDialog product={adjustOpen} onClose={() => setAdjustOpen(null)} onApply={(delta, reason) => {
+          const r = adjustStock(adjustOpen.id, delta, reason, user ? { userId: user.id, userName: user.name } : undefined);
+          if (!r.ok) toast.error(r.error ?? "Erreur"); else { toast.success("Stock ajusté"); setAdjustOpen(null); }
+        }} />
+      )}
+      {transferOpen && (
+        <TransferDialog product={transferOpen} stores={stores} onClose={() => setTransferOpen(null)} onApply={(toStoreId, qty) => {
+          const r = transferStock(transferOpen.id, transferOpen.storeId, toStoreId, qty, user ? { userId: user.id, userName: user.name } : undefined);
+          if (!r.ok) toast.error(r.error ?? "Erreur"); else { toast.success("Transfert effectué"); setTransferOpen(null); }
+        }} />
+      )}
+    </div>
+  );
+}
+
+function MoveRow({ m, stores }: { m: StockMove; stores: { id: string; name: string }[] }) {
+  const colors: Record<string, string> = {
+    IN: "text-success", OUT: "text-warning", ADJUST: "text-muted-foreground",
+    TRANSFER: "text-accent", SALE: "text-primary", REFUND: "text-destructive",
+  };
+  return (
+    <TableRow>
+      <TableCell className="text-xs">{new Date(m.date).toLocaleString("fr-FR")}</TableCell>
+      <TableCell><Badge variant="outline" className={colors[m.type]}>{m.type}</Badge></TableCell>
+      <TableCell className="text-xs">{m.productName}</TableCell>
+      <TableCell className="text-xs">{stores.find((s) => s.id === m.storeId)?.name.split("—")[0]}{m.toStoreId && ` → ${stores.find((s) => s.id === m.toStoreId)?.name.split("—")[0]}`}</TableCell>
+      <TableCell className={`text-right font-mono ${m.delta >= 0 ? "text-success" : "text-destructive"}`}>{m.delta > 0 ? "+" : ""}{m.delta}</TableCell>
+      <TableCell className="text-xs text-muted-foreground">{m.reason ?? "—"}</TableCell>
+      <TableCell className="text-xs">{m.userName ?? "—"}</TableCell>
+    </TableRow>
+  );
+}
+
+function AdjustDialog({ product, onClose, onApply }: { product: Product; onClose: () => void; onApply: (delta: number, reason: string) => void }) {
+  const [delta, setDelta] = useState(0);
+  const [reason, setReason] = useState("");
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent>
+        <DialogHeader><DialogTitle>Ajuster le stock — {product.name}</DialogTitle></DialogHeader>
+        <p className="text-xs text-muted-foreground">Stock actuel : <span className="font-mono font-bold">{product.stock}</span></p>
+        <div className="space-y-3">
+          <div className="space-y-1.5">
+            <Label>Variation (positive = entrée, négative = sortie)</Label>
+            <Input type="number" value={delta} onChange={(e) => setDelta(parseInt(e.target.value) || 0)} autoFocus />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Motif</Label>
+            <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Réception fournisseur, casse, inventaire..." />
+          </div>
+          <p className="text-sm">Nouveau stock : <span className="font-mono font-bold">{product.stock + delta}</span></p>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Annuler</Button>
+          <Button className="gradient-primary text-primary-foreground" disabled={delta === 0 || !reason.trim()} onClick={() => onApply(delta, reason.trim())}>Appliquer</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function TransferDialog({ product, stores, onClose, onApply }: { product: Product; stores: { id: string; name: string }[]; onClose: () => void; onApply: (toStoreId: string, qty: number) => void }) {
+  const others = stores.filter((s) => s.id !== product.storeId);
+  const [toStoreId, setToStoreId] = useState(others[0]?.id ?? "");
+  const [qty, setQty] = useState(1);
+  if (others.length === 0) {
+    return (
+      <Dialog open onOpenChange={onClose}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Transfert impossible</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">Au moins 2 magasins sont requis pour effectuer un transfert.</p>
+          <DialogFooter><Button onClick={onClose}>Fermer</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+    );
+  }
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent>
+        <DialogHeader><DialogTitle>Transférer — {product.name}</DialogTitle></DialogHeader>
+        <p className="text-xs text-muted-foreground">Stock disponible : <span className="font-mono font-bold">{product.stock}</span></p>
+        <div className="space-y-3">
+          <div className="space-y-1.5">
+            <Label>Vers le magasin</Label>
+            <Select value={toStoreId} onValueChange={setToStoreId}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>{others.map((s) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label>Quantité</Label>
+            <Input type="number" min={1} max={product.stock} value={qty} onChange={(e) => setQty(parseInt(e.target.value) || 0)} />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Annuler</Button>
+          <Button className="gradient-primary text-primary-foreground" disabled={qty <= 0 || qty > product.stock || !toStoreId} onClick={() => onApply(toStoreId, qty)}>Transférer</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ProductDialog({ editing, onSave, stores, categories }: {
+  editing: Product | null;
+  onSave: (p: Omit<Product, "id" | "createdAt">) => void;
+  stores: { id: string; name: string }[];
+  categories: string[];
+}) {
+  const [form, setForm] = useState<Omit<Product, "id" | "createdAt">>(
+    editing
+      ? { name: editing.name, price: editing.price, stock: editing.stock, storeId: editing.storeId, category: editing.category, sku: editing.sku }
+      : { name: "", price: 0, stock: 0, storeId: stores[0]?.id ?? "s1", category: undefined, sku: "" }
+  );
+
+  const submit = () => {
+    if (!form.name.trim() || form.price <= 0) { toast.error("Nom et prix requis"); return; }
+    const sku = form.sku.trim() || `KZ-${form.storeId.toUpperCase()}-${Date.now().toString().slice(-5)}`;
+    onSave({ ...form, name: form.name.trim(), sku });
+  };
+
+  return (
+    <DialogContent>
+      <DialogHeader><DialogTitle>{editing ? "Modifier" : "Nouveau"} produit</DialogTitle></DialogHeader>
+      <div className="grid grid-cols-2 gap-4">
+        <div className="col-span-2 space-y-2">
+          <Label>Nom *</Label>
+          <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} autoFocus />
+        </div>
+        <div className="space-y-2">
+          <Label>Référence (SKU)</Label>
+          <Input value={form.sku} onChange={(e) => setForm({ ...form, sku: e.target.value })} placeholder="auto si vide" />
+        </div>
+        <div className="space-y-2">
+          <Label>Catégorie (facultatif)</Label>
+          <CategoryCombobox value={form.category} onChange={(v) => setForm({ ...form, category: v })} options={categories} />
+        </div>
+        <div className="space-y-2">
+          <Label>Prix (€) *</Label>
+          <Input type="number" step="0.01" value={form.price || ""} onChange={(e) => setForm({ ...form, price: +e.target.value || 0 })} />
+        </div>
+        <div className="space-y-2">
+          <Label>Stock</Label>
+          <Input type="number" value={form.stock} onChange={(e) => setForm({ ...form, stock: +e.target.value || 0 })} />
+        </div>
+        <div className="col-span-2 space-y-2">
+          <Label>Magasin</Label>
+          <Select value={form.storeId} onValueChange={(v) => setForm({ ...form, storeId: v })}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>{stores.map((s) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
+          </Select>
+        </div>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Format CSV attendu : <code className="font-mono">name,sku,price,stock,category,storeId</code>
+      </p>
+      <DialogFooter>
+        <Button className="gradient-primary text-primary-foreground" onClick={submit}>Enregistrer</Button>
+      </DialogFooter>
+    </DialogContent>
+  );
+}

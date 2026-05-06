@@ -1,0 +1,32 @@
+
+*.db
+*.db-shm
+*.db-wal
+dist
+dist/
+dist-ssr
+.DS_Store
+# Editor directories and files
+.idea
+lerna-debug.log*
+*.local
+*.log
+logs
+# Logs
+.lovable/
+*.njsproj
+node_modules
+node_modules/
+npm-debug.log*
+*.ntvs*
+.obsidian/
+pnpm-debug.log*
+*.sln
+*.suo
+*.sw?
+target/
+.vscode/
+.vscode/*
+!.vscode/extensions.json
+yarn-debug.log*
+yarn-error.log*

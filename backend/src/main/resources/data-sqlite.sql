@@ -1,0 +1,2 @@
+-- Données initiales gérées par DataInitializer.java (Spring CommandLineRunner).
+-- Ce fichier est conservé pour éviter l'erreur Spring Boot "data-sqlite.sql not found".

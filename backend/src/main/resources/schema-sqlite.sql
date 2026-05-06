@@ -1,0 +1,3 @@
+-- Laissé vide intentionnellement.
+-- Le schéma SQLite est géré par Hibernate (ddl-auto: create).
+-- Ce fichier est conservé pour éviter l'erreur Spring Boot "schema-sqlite.sql not found".

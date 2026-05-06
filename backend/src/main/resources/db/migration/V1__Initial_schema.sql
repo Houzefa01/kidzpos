@@ -1,0 +1,19 @@
+-- Add missing currency column to settings table if it doesn't exist
+ALTER TABLE IF EXISTS settings 
+ADD COLUMN IF NOT EXISTS currency VARCHAR(10) NOT NULL DEFAULT 'AR';
+
+-- Ensure all required columns exist in settings table
+ALTER TABLE IF EXISTS settings 
+ADD COLUMN IF NOT EXISTS tax_rate DOUBLE PRECISION DEFAULT 0.0;
+
+ALTER TABLE IF EXISTS settings 
+ADD COLUMN IF NOT EXISTS euro_per_point DOUBLE PRECISION DEFAULT 1.0;
+
+ALTER TABLE IF EXISTS settings 
+ADD COLUMN IF NOT EXISTS points_per_euro DOUBLE PRECISION DEFAULT 1.0;
+
+ALTER TABLE IF EXISTS settings 
+ADD COLUMN IF NOT EXISTS shop_name VARCHAR(255) DEFAULT 'KidzPOS';
+
+ALTER TABLE IF EXISTS settings 
+ADD COLUMN IF NOT EXISTS max_discount_percent DOUBLE PRECISION DEFAULT 10.0;

@@ -29,9 +29,10 @@ public class SecurityConfig {
                 .requestMatchers(
                     "/api/auth/**",
                     "/actuator/health",
-                    "/api/exchange/**",
                     "/api/events/stream"
                 ).permitAll()
+                // M4 : /api/exchange/refresh déclenche un appel HTTP sortant ⇒ exiger une auth
+                // pour éviter qu'un client non autorisé sur le LAN ne spamme l'API externe.
                 .requestMatchers(HttpMethod.POST, "/api/users/**").hasRole("ADMIN")
                 .requestMatchers(HttpMethod.PUT, "/api/users/**").hasRole("ADMIN")
                 .requestMatchers(HttpMethod.DELETE, "/api/users/**").hasRole("ADMIN")

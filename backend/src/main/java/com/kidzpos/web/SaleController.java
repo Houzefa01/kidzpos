@@ -114,7 +114,7 @@ public class SaleController {
         Sale sale = Sale.builder()
                 .id(saleId).seq(seq)
                 .storeId(req.storeId())
-                .userId(me.id()).userName(me.email())
+                .userId(me.id()).userName(me.name())
                 .subtotal(round(subtotal)).tax(round(tax)).taxRate(s.getTaxRate())
                 .discount(round(discount)).total(round(total))
                 .date(Instant.now())
@@ -182,7 +182,7 @@ public class SaleController {
         String id = "ref-" + UUID.randomUUID();
         Sale refund = Sale.builder()
                 .id(id).seq(seq).storeId(orig.getStoreId())
-                .userId(me.id()).userName(me.email())
+                .userId(me.id()).userName(me.name())
                 .subtotal(-orig.getSubtotal()).tax(-orig.getTax()).taxRate(orig.getTaxRate())
                 .discount(-orig.getDiscount()).total(-orig.getTotal())
                 .date(Instant.now())

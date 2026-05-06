@@ -45,7 +45,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
                 if (u.isPresent() && u.get().isActive()) {
                     User user = u.get();
                     var auth = new UsernamePasswordAuthenticationToken(
-                            new AuthPrincipal(user.getId(), user.getEmail(), user.getRole().name(), user.getStoreId()),
+                            new AuthPrincipal(user.getId(), user.getName(), user.getEmail(), user.getRole().name(), user.getStoreId()),
                             null,
                             List.of(new SimpleGrantedAuthority("ROLE_" + user.getRole().name()))
                     );
@@ -61,5 +61,6 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         chain.doFilter(req, res);
     }
 
-    public record AuthPrincipal(String id, String email, String role, String storeId) {}
+    /** I2 : ajout de `name` pour stocker le vrai nom utilisateur dans Sale.userName (pas l'email). */
+    public record AuthPrincipal(String id, String name, String email, String role, String storeId) {}
 }

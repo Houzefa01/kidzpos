@@ -51,7 +51,7 @@ Convention : `[ ]` à faire · `[x]` fait + commit hash.
 
 ## Phase 5 — Frontend : UI & UX (2 items)
 
-- [ ] **5.1** I7-FE 🟠 URL `open.er-api.com` — `exchange.ts`
+- [x] **5.1** I7-FE 🟠 URL `open.er-api.com` — `exchange.ts`
 - [ ] **5.2** M6 🟡 `useFormatMoney` sans rerender redondant — `money.ts`
 
 ## Phase 6 — Tests E2E (6 scénarios)

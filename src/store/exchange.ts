@@ -37,11 +37,12 @@ export const useExchange = create<ExchangeState>()(
         } catch (_) { /* on essaie le fallback navigateur */ }
 
         // 2) Si le backend n'a pas eu de taux frais, tenter depuis le navigateur
+        // I7 : open.er-api.com (gratuit sans clé) au lieu de api.exchangerate.host (paywall depuis 2024)
         if (navigator.onLine && !backendLive) {
           try {
             const ctrl = new AbortController();
             const t = setTimeout(() => ctrl.abort(), 6000);
-            const res = await fetch("https://api.exchangerate.host/latest?base=EUR&symbols=MGA", { signal: ctrl.signal });
+            const res = await fetch("https://open.er-api.com/v6/latest/EUR", { signal: ctrl.signal });
             clearTimeout(t);
             if (!res.ok) throw new Error("HTTP " + res.status);
             const j = await res.json();

@@ -56,13 +56,22 @@ public class DataInitializer implements CommandLineRunner {
 
     /**
      * Reads a password from an environment variable. If absent, generates a random UUID
-     * and logs it once — operator must change it after first login.
+     * and writes it once to STDOUT (jamais dans les logs persistés — risque fuite).
+     * L'opérateur DOIT le copier au démarrage et le changer après première connexion.
      */
     private String resolvePassword(String envVar, String userEmail) {
         String pwd = System.getenv(envVar);
         if (pwd == null || pwd.isBlank()) {
             pwd = UUID.randomUUID().toString();
-            log.warn("Env var {} not set. Generated initial password for {}: {}", envVar, userEmail, pwd);
+            // M2 : on n'envoie PAS le password dans les logs (logback peut être archivé/expédié).
+            // STDOUT direct → visible au démarrage interactif, pas dans les logs structurés.
+            System.out.println("============================================================");
+            System.out.println("⚠ INITIAL PASSWORD GENERATED for " + userEmail);
+            System.out.println("  password = " + pwd);
+            System.out.println("  → Set env var " + envVar + " to suppress this message.");
+            System.out.println("  → Change this password after first login.");
+            System.out.println("============================================================");
+            log.warn("Env var {} not set. Initial password generated for {} (printed to STDOUT only).", envVar, userEmail);
         }
         return pwd;
     }

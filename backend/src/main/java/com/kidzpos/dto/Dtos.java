@@ -63,8 +63,8 @@ public class Dtos {
     ) {}
 
     public record SettingsReq(
-            @PositiveOrZero double taxRate,
-            @PositiveOrZero double maxDiscountPercent,
+            @PositiveOrZero @DecimalMax("100") double taxRate,
+            @PositiveOrZero @DecimalMax("100") double maxDiscountPercent,
             @PositiveOrZero double pointsPerEuro,
             @PositiveOrZero double euroPerPoint,
             @NotBlank String shopName,

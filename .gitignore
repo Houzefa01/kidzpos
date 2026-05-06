@@ -2,6 +2,8 @@
 *.db
 *.db-shm
 *.db-wal
+.env
+data/
 dist
 dist/
 dist-ssr

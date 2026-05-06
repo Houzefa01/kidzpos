@@ -49,10 +49,12 @@ Convention : `[ ]` à faire · `[x]` fait + commit hash.
 
 **Validation** : `tsc --noEmit` ⇒ 12 erreurs pré-existantes (0 régression). `npm run build` ⇒ ✅ built in 2.23s.
 
-## Phase 5 — Frontend : UI & UX (2 items)
+## Phase 5 — Frontend : UI & UX (2 items) — ✅ TERMINÉE
 
-- [x] **5.1** I7-FE 🟠 URL `open.er-api.com` — `exchange.ts`
-- [x] **5.2** M6 🟡 `useFormatMoney` sans rerender redondant — `money.ts`
+- [x] **5.1** I7-FE 🟠 URL `open.er-api.com` — `4acd1fb`
+- [x] **5.2** M6 🟡 `useFormatMoney` sans rerender redondant — `bdb1853`
+
+**Validation** : tsc 12 erreurs pré-existantes (0 régression), `npm run build` ✅ 2.15s, `npm run lint` ✅ 0 errors.
 
 ## Phase 6 — Tests E2E (6 scénarios)
 

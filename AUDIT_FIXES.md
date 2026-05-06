@@ -60,7 +60,7 @@ Convention : `[ ]` à faire · `[x]` fait + commit hash.
 
 - [x] **5b.1** TS6133 — imports/params non utilisés (calendar.tsx, Dashboard.tsx, POS.tsx) — `30c6a7b`
 - [x] **5b.2** TS2322 recharts — Tooltip `formatter` accepte `ValueType` (Dashboard.tsx) — `418c3bf`
-- [x] **5b.3** TS2345/TS2322 auth.ts — gestion `string | null` de `hashPassword` — pending
+- [x] **5b.3** TS2345/TS2322 auth.ts — gestion `string | null` de `hashPassword` — `eea1737`
 
 **Validation finale** :
 - `tsc --noEmit -p tsconfig.app.json` ⇒ ✅ **0 erreurs** (12 → 0)

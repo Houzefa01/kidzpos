@@ -3,22 +3,25 @@
 Référence : audit complet de la session (6 phases, 22 items + 4 reportés).
 Convention : `[ ]` à faire · `[x]` fait + commit hash.
 
-## Phase 1 — Backend : sécurité & intégrité données (14 items)
+## Phase 1 — Backend : sécurité & intégrité données (14 items) — ✅ TERMINÉE
 
-- [x] **1.1** B1 🔴 SQLite `ddl-auto: create` → `update` — `application.yml`
-- [x] **1.2** B2 🔴 Migration Flyway V1 : schéma complet — `V1__Initial_schema.sql`
-- [x] **1.3** B3 🔴 `Sale.seq` unique constraint + retry — `Sale.java`, `SaleController.java`
-- [x] **1.4** B5 🔴 `pointsRedeemed @PositiveOrZero` + plafond — `Dtos.java`, `SaleController.java`
-- [x] **1.5** B6 🔴 Stock concurrent atomique — `ProductRepository.java`, `SaleController.java`
-- [x] **1.6** I3 🟠 DELETE customers/products + PUT/DELETE stores ADMIN-only — `SecurityConfig.java`, `CustomerController.java`
-- [x] **1.7** I4 🟠 `CustomerController` `@Valid` — `CustomerController.java`
-- [x] **1.8** I5 🟠 Refund idempotent — `SaleRepository.java`, `SaleController.java`
-- [x] **1.9** I9 🟠 CORS HTTPS par défaut — `application.yml`
-- [x] **1.10** M1 🟡 `JwtAuthFilter` log debug — `JwtAuthFilter.java`
-- [x] **1.11** M2 🟡 `DataInitializer` ne log pas les passwords — `DataInitializer.java`
-- [x] **1.12** M4 🟡 `/api/exchange/**` authenticated — `SecurityConfig.java`
-- [x] **1.13** M8 🟡 `SettingsReq` borné `<= 100` — `Dtos.java`
-- [x] **1.14** M10 🟡 `@AuthenticationPrincipal` partout — `SaleController.java`, `StockController.java`, `CustomerController.java`
+- [x] **1.1** B1 🔴 SQLite `ddl-auto: create` → `update` — `6468564`
+- [x] **1.2** B2 🔴 Migration Flyway V1 : schéma complet — `325dacf`
+- [x] **1.3** B3 🔴 `Sale.seq` unique constraint + retry — `60e73d8`
+- [x] **1.4** B5 🔴 `pointsRedeemed @PositiveOrZero` + plafond — `848ecaf`
+- [x] **1.5** B6 🔴 Stock concurrent atomique — `1c9c602`
+- [x] **1.6** I3 🟠 DELETE customers/products + PUT/DELETE stores ADMIN-only — `0d0108c`
+- [x] **1.7** I4 🟠 `CustomerController` `@Valid` — `89b0be0`
+- [x] **1.8** I5 🟠 Refund idempotent — `b783032`
+- [x] **1.9** I9 🟠 CORS HTTPS par défaut — `5670a12`
+- [x] **1.10** M1 🟡 `JwtAuthFilter` log debug — `1417509`
+- [x] **1.11** M2 🟡 `DataInitializer` ne log pas les passwords — `730a1b1`
+- [x] **1.12** M4 🟡 `/api/exchange/**` authenticated — `cf3f7df`
+- [x] **1.13** M8 🟡 `SettingsReq` borné `<= 100` — `5b7eb30`
+- [x] **1.14** M10 🟡 `@AuthenticationPrincipal` partout — `1e57bd1`
+
+**Validation** : `mvn -DskipTests clean compile` ⇒ BUILD SUCCESS (36 sources, 0 warning).
+`mvn test` ⇒ BUILD SUCCESS (no tests, suite vide existante).
 
 ## Phase 2 — Backend : API & contrats (5 items)
 

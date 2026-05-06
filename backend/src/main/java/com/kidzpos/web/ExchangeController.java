@@ -17,7 +17,8 @@ import java.util.Map;
 
 /**
  * Service taux de change EUR -> MGA (Ariary).
- * - Si internet dispo : appelle exchangerate.host (gratuit, sans clé).
+ * - Si internet dispo : appelle open.er-api.com (gratuit, sans clé) — I7.
+ *   (api.exchangerate.host nécessite désormais une clé API → abandonné.)
  * - Sinon : renvoie le dernier taux connu + flag offline.
  */
 @RestController
@@ -47,8 +48,9 @@ public class ExchangeController {
     @PostMapping("/refresh")
     public ResponseEntity<?> refresh() {
         try {
+            // I7 : open.er-api.com renvoie {"result":"success","rates":{"MGA":...}, ...}
             var req = HttpRequest.newBuilder()
-                    .uri(URI.create("https://api.exchangerate.host/latest?base=EUR&symbols=MGA"))
+                    .uri(URI.create("https://open.er-api.com/v6/latest/EUR"))
                     .timeout(Duration.ofSeconds(4))
                     .GET().build();
             HttpResponse<String> res = http.send(req, HttpResponse.BodyHandlers.ofString());

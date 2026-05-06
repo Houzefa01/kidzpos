@@ -5,7 +5,7 @@ import { StatCard } from "@/components/StatCard";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Banknote, ShoppingBag, AlertTriangle, Package, TrendingUp, TrendingDown, Star } from "lucide-react";
+import { Banknote, AlertTriangle, Package, TrendingUp, TrendingDown, Star } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { useMemo } from "react";
 import { useFormatMoney } from "@/lib/money";

@@ -133,11 +133,13 @@ export const useAuth = create<AuthState>()(
         if (!useBackend.getState().lanReachable) {
           return { ok: false, error: "Connexion serveur requise pour créer un utilisateur" };
         }
+        // hashPassword retourne null si crypto.subtle indispo (HTTP non-localhost) :
+        // dans ce cas on ne stocke pas de hash local, l'auth offline sera juste indispo.
         const hashed = await hashPassword(password);
         const newUser = { ...u, email, id: `u${Date.now()}` };
         set((s) => ({
           users: [...s.users, newUser],
-          passwords: { ...s.passwords, [email]: hashed },
+          passwords: hashed ? { ...s.passwords, [email]: hashed } : s.passwords,
         }));
         broadcastSync("kidzpos-auth");
         pushMutation("/api/users", "POST", {
@@ -202,7 +204,11 @@ export const useAuth = create<AuthState>()(
         }
         const hashed = await hashPassword(password);
         const e = email.toLowerCase();
-        set((s) => ({ passwords: { ...s.passwords, [e]: hashed } }));
+        // hashPassword peut retourner null (crypto.subtle indispo). On ne stocke
+        // que si on a un hash valide ; sinon, l'auth offline sera indispo pour ce user.
+        if (hashed) {
+          set((s) => ({ passwords: { ...s.passwords, [e]: hashed } }));
+        }
         broadcastSync("kidzpos-auth");
         const u = get().users.find((x) => x.email.toLowerCase() === e);
         if (u) pushMutation(`/api/users/${u.id}`, "PUT", { password }, `user:${u.id}`);
@@ -220,7 +226,10 @@ export const useAuth = create<AuthState>()(
         };
         const updates: Record<string, string> = {};
         for (const [email, pwd] of Object.entries(seeds)) {
-          if (!state.passwords[email]) updates[email] = await hashPassword(pwd);
+          if (!state.passwords[email]) {
+            const h = await hashPassword(pwd);
+            if (h) updates[email] = h;
+          }
         }
         if (Object.keys(updates).length) {
           useAuth.setState((s) => ({ passwords: { ...s.passwords, ...updates } }));

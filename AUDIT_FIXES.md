@@ -56,11 +56,16 @@ Convention : `[ ]` à faire · `[x]` fait + commit hash.
 
 **Validation** : tsc 12 erreurs pré-existantes (0 régression), `npm run build` ✅ 2.15s, `npm run lint` ✅ 0 errors.
 
-## Phase 5 bonus — résolution de la dette tsc pré-existante (3 items, 12 erreurs)
+## Phase 5 bonus — résolution de la dette tsc pré-existante (3 items, 12 erreurs) — ✅ TERMINÉE
 
-- [x] **5b.1** TS6133 — imports/params non utilisés (calendar.tsx, Dashboard.tsx, POS.tsx)
-- [x] **5b.2** TS2322 recharts — Tooltip `formatter` accepte `ValueType` (Dashboard.tsx)
-- [ ] **5b.3** TS2345/TS2322 auth.ts — gestion `string | null` de `hashPassword`
+- [x] **5b.1** TS6133 — imports/params non utilisés (calendar.tsx, Dashboard.tsx, POS.tsx) — `30c6a7b`
+- [x] **5b.2** TS2322 recharts — Tooltip `formatter` accepte `ValueType` (Dashboard.tsx) — `418c3bf`
+- [x] **5b.3** TS2345/TS2322 auth.ts — gestion `string | null` de `hashPassword` — pending
+
+**Validation finale** :
+- `tsc --noEmit -p tsconfig.app.json` ⇒ ✅ **0 erreurs** (12 → 0)
+- `npm run build` ⇒ ✅ built in 2.31s
+- `npm run lint` ⇒ ✅ 0 errors, 7 warnings react-refresh pré-existantes (composants ui/ non modifiés)
 
 ## Phase 6 — Tests E2E (6 scénarios)
 

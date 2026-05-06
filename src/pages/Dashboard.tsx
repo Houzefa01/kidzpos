@@ -76,6 +76,15 @@ export default function Dashboard() {
 
   const recent = [...scopedSales].slice(0, 6);
 
+  // Helper recharts Tooltip : signature alignée sur `Formatter` de recharts
+  // (ValueType = number | string | ReadonlyArray<number|string>, peut être undefined).
+  const tooltipFmt = (value: number | string | ReadonlyArray<number | string> | undefined): string => {
+    if (value == null) return "";
+    const v = Array.isArray(value) ? value[0] : (value as number | string);
+    if (v == null) return "";
+    return fmt(typeof v === "number" ? v : Number(v));
+  };
+
   return (
     <div className="space-y-6">
       <div>
@@ -109,7 +118,7 @@ export default function Dashboard() {
                     <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                     <XAxis dataKey="day" stroke="hsl(var(--muted-foreground))" fontSize={12} />
                     <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                    <Tooltip contentStyle={{ background: "hsl(var(--popover))", border: "1px solid hsl(var(--border))", borderRadius: 8 }} formatter={(value: number | string) => fmt(typeof value === "number" ? value : Number(value))} />
+                    <Tooltip contentStyle={{ background: "hsl(var(--popover))", border: "1px solid hsl(var(--border))", borderRadius: 8 }} formatter={tooltipFmt} />
                     <Line type="monotone" dataKey="Total" stroke="hsl(var(--primary))" strokeWidth={3} dot={{ fill: "hsl(var(--primary))" }} />
                   </LineChart>
                 </ResponsiveContainer>
@@ -124,7 +133,7 @@ export default function Dashboard() {
                       <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                       <XAxis dataKey="name" stroke="hsl(var(--muted-foreground))" fontSize={11} />
                       <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                      <Tooltip contentStyle={{ background: "hsl(var(--popover))", border: "1px solid hsl(var(--border))", borderRadius: 8 }} formatter={(value: number | string) => fmt(typeof value === "number" ? value : Number(value))} />
+                      <Tooltip contentStyle={{ background: "hsl(var(--popover))", border: "1px solid hsl(var(--border))", borderRadius: 8 }} formatter={tooltipFmt} />
                       <Bar dataKey="Ventes" radius={[8, 8, 0, 0]}>
                         {byStore.map((_, i) => <Cell key={i} fill={i === 0 ? "hsl(var(--primary))" : "hsl(var(--accent))"} />)}
                       </Bar>
@@ -145,7 +154,7 @@ export default function Dashboard() {
                   <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                   <XAxis dataKey="label" stroke="hsl(var(--muted-foreground))" fontSize={11} />
                   <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                  <Tooltip contentStyle={{ background: "hsl(var(--popover))", border: "1px solid hsl(var(--border))", borderRadius: 8 }} formatter={(value: number | string) => fmt(typeof value === "number" ? value : Number(value))} />
+                  <Tooltip contentStyle={{ background: "hsl(var(--popover))", border: "1px solid hsl(var(--border))", borderRadius: 8 }} formatter={tooltipFmt} />
                   <Bar dataKey="Total" radius={[6, 6, 0, 0]} fill="hsl(var(--primary))" />
                 </BarChart>
               </ResponsiveContainer>

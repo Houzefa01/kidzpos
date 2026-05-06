@@ -19,6 +19,15 @@ Aucun n'est bloquant pour le fonctionnement actuel.
 **Pourquoi reporté** : config dev uniquement, ne touche pas la prod (le frontend est servi en statique en prod via Caddy/nginx).
 **Solution proposée** : `vite.config.ts > server.port = 5173` (défaut Vite).
 
+### Dette tsc pré-existante (12 erreurs `--strict` non liées à l'audit)
+**Pourquoi reporté** : ces erreurs existaient sur `afffda6` (snapshot avant audit) et ne sont pas dans le périmètre du rapport.
+**Détail** :
+- `src/components/ui/calendar.tsx` (×2) — paramètres `_props` non utilisés (TS6133).
+- `src/pages/Dashboard.tsx` (×4) — `Tooltip` recharts : signature `Formatter` accepte `ValueType | undefined` mais notre callback exige `string | number` (TS2322) ; import `ShoppingBag` inutilisé (TS6133).
+- `src/pages/POS.tsx` (×3) — imports `DialogTrigger`, `Search`, var `sym` non utilisés (TS6133).
+- `src/store/auth.ts` (×3) — `passwords: Record<string, string>` mais `hashPassword()` retourne `string | null` ⇒ incompatibilité d'index signature (TS2345/TS2322).
+**Fix proposé** : supprimer imports inutilisés ; resserrer `hashPassword` à `Promise<string>` ou élargir `passwords` à `Record<string, string | null>` ; wrapper `Tooltip formatter` avec `(value) => fmt(value as number)`.
+
 ## Performance
 
 - Pagination sur `GET /api/sales` (`?page=&size=`) + index `(storeId, date DESC)`.

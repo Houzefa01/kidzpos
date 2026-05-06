@@ -33,10 +33,15 @@ Convention : `[ ]` à faire · `[x]` fait + commit hash.
 
 **Validation** : `mvn -DskipTests clean compile` ⇒ BUILD SUCCESS (37 sources, 0 warning).
 
-## Phase 3 — Frontend : couche réseau (2 items)
+## Phase 3 — Frontend : couche réseau (2 items) — ✅ TERMINÉE
 
-- [x] **3.1** I6 🟠 Outbox dédoublonnage + plafond — `outbox.ts`
-- [x] **3.2** M7 🟡 Pas de password clair en outbox — `auth.ts`
+- [x] **3.1** I6 🟠 Outbox dédoublonnage + plafond — `0a94d9e`
+- [x] **3.2** M7 🟡 Pas de password clair en outbox — `2df133b`
+
+**Validation** :
+- `tsc --noEmit -p tsconfig.app.json` ⇒ 12 erreurs **toutes pré-existantes** (vérifié contre snapshot `afffda6`). Aucune erreur nouvelle. Détails dans TODO_FUTURE.md.
+- `npm run build` ⇒ ✅ built in 2.80s, dist/ OK.
+- `npm run lint` ⇒ 0 errors, 7 warnings pré-existantes (react-refresh sur composants ui/).
 
 ## Phase 4 — Frontend : stores Zustand (1 item)
 

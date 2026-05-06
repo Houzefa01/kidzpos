@@ -36,6 +36,13 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.PUT, "/api/users/**").hasRole("ADMIN")
                 .requestMatchers(HttpMethod.DELETE, "/api/users/**").hasRole("ADMIN")
                 .requestMatchers(HttpMethod.PUT, "/api/settings/**").hasRole("ADMIN")
+                // I3 : seules les actions destructrices/sensibles sont ADMIN-only.
+                // Création produit/client : autorisée à tout authentifié (caissier).
+                .requestMatchers(HttpMethod.DELETE, "/api/products/**").hasRole("ADMIN")
+                .requestMatchers(HttpMethod.DELETE, "/api/customers/**").hasRole("ADMIN")
+                .requestMatchers(HttpMethod.POST, "/api/stores/**").hasRole("ADMIN")
+                .requestMatchers(HttpMethod.PUT, "/api/stores/**").hasRole("ADMIN")
+                .requestMatchers(HttpMethod.DELETE, "/api/stores/**").hasRole("ADMIN")
                 .anyRequest().authenticated()
             )
             .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);

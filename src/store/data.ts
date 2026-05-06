@@ -249,8 +249,11 @@ export const useData = create<DataState>()(
           };
         });
         broadcastSync("kidzpos-data");
-        // Backend : POST checkout (le serveur recalcule total + décrémente stock DB)
+        // Backend : POST checkout (le serveur recalcule total + décrémente stock DB).
+        // I8-FE : clientSaleId = id local → idempotence du replay outbox après reconnexion
+        // (le backend renvoie la vente existante au lieu d'en créer une nouvelle).
         pushMutation("/api/sales/checkout", "POST", {
+          clientSaleId: full.id,
           storeId: sale.storeId,
           items: sale.items.map((i) => ({ productId: i.productId, quantity: i.quantity })),
           discount: sale.discount,

@@ -45,7 +45,7 @@ Convention : `[ ]` à faire · `[x]` fait + commit hash.
 
 ## Phase 4 — Frontend : stores Zustand (1 item)
 
-- [ ] **4.1** I8-FE 🟠 `clientSaleId` dans payload checkout — `data.ts`
+- [x] **4.1** I8-FE 🟠 `clientSaleId` dans payload checkout — `data.ts`
 
 ## Phase 5 — Frontend : UI & UX (2 items)
 

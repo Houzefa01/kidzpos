@@ -6,7 +6,7 @@ Convention : `[ ]` à faire · `[x]` fait + commit hash.
 ## Phase 1 — Backend : sécurité & intégrité données (14 items)
 
 - [x] **1.1** B1 🔴 SQLite `ddl-auto: create` → `update` — `application.yml`
-- [ ] **1.2** B2 🔴 Migration Flyway V1 : schéma complet — `V1__Initial_schema.sql`
+- [x] **1.2** B2 🔴 Migration Flyway V1 : schéma complet — `V1__Initial_schema.sql`
 - [ ] **1.3** B3 🔴 `Sale.seq` unique constraint + retry — `Sale.java`, `SaleController.java`
 - [ ] **1.4** B5 🔴 `pointsRedeemed @PositiveOrZero` + plafond — `Dtos.java`, `SaleController.java`
 - [ ] **1.5** B6 🔴 Stock concurrent atomique — `ProductRepository.java`, `SaleController.java`

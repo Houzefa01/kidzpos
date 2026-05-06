@@ -23,13 +23,15 @@ Convention : `[ ]` à faire · `[x]` fait + commit hash.
 **Validation** : `mvn -DskipTests clean compile` ⇒ BUILD SUCCESS (36 sources, 0 warning).
 `mvn test` ⇒ BUILD SUCCESS (no tests, suite vide existante).
 
-## Phase 2 — Backend : API & contrats (5 items)
+## Phase 2 — Backend : API & contrats (5 items) — ✅ TERMINÉE
 
-- [x] **2.1** B4 🔴 `Sale.items` LAZY + `@EntityGraph` — `Sale.java`, `SaleRepository.java`
-- [x] **2.2** I1 🟠 `@RestControllerAdvice` global — nouveau `GlobalExceptionHandler.java`
-- [x] **2.3** I2 🟠 `AuthPrincipal.name` + Sale.userName — `JwtAuthFilter.java`, `SaleController.java`
-- [x] **2.4** I8-BE 🟠 `CheckoutReq.clientSaleId` + idempotence — `Dtos.java`, `SaleController.java`
-- [x] **2.5** I7-BE 🟠 URL `open.er-api.com` — `ExchangeController.java`
+- [x] **2.1** B4 🔴 `Sale.items` LAZY + `@EntityGraph` — `d3a56b8`
+- [x] **2.2** I1 🟠 `@RestControllerAdvice` global — `a6b90e8`
+- [x] **2.3** I2 🟠 `AuthPrincipal.name` + Sale.userName — `963db45`
+- [x] **2.4** I8-BE 🟠 `CheckoutReq.clientSaleId` + idempotence — `8915318`
+- [x] **2.5** I7-BE 🟠 URL `open.er-api.com` — `611e709`
+
+**Validation** : `mvn -DskipTests clean compile` ⇒ BUILD SUCCESS (37 sources, 0 warning).
 
 ## Phase 3 — Frontend : couche réseau (2 items)
 

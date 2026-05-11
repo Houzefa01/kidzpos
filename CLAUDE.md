@@ -11,7 +11,7 @@ Architecture : SPA React → REST/SSE → Spring Boot → PostgreSQL.
 | Outil | Rôle |
 |---|---|
 | React 18 + TypeScript 5.8 | SPA |
-| Vite 8 + `@vitejs/plugin-react-swc` | Bundler (port dev 8080 — conflit avec backend si les deux tournent) |
+| Vite 8 + `@vitejs/plugin-react-swc` | Bundler (port dev 5173) |
 | Zustand 5 + `persist` middleware | État global persisté en localStorage |
 | React Router DOM v6 | Routing (lazy loading via `React.lazy`) |
 | shadcn/ui (Radix UI) | Composants UI (toute la bibliothèque installée) |
@@ -90,7 +90,7 @@ Architecture : SPA React → REST/SSE → Spring Boot → PostgreSQL.
 ```bash
 # Frontend
 npm install          # ou npm ci (CI)
-npm run dev          # dev server sur :8080 (vite.config.ts — port 8080 configuré)
+npm run dev          # dev server sur :5173 (vite.config.ts)
 npm run build        # build prod dans dist/
 npm run test         # vitest run
 npm run lint         # eslint
@@ -252,4 +252,3 @@ Toutes optionnelles (valeurs par défaut dans `application.yml` et `start-server
 - Pas de pagination sur `GET /api/sales`
 - Aucun test d'intégration backend (TestContainers)
 - Types TS non générés depuis les DTOs Java (drift FE/BE possible)
-- Port Vite en dev = 8080 = port backend (collision si les deux tournent localement)

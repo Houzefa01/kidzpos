@@ -47,7 +47,12 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.DELETE, "/api/stores/**").hasRole("ADMIN")
                 .anyRequest().authenticated()
             )
-            .addFilterBefore(loginRateLimitFilter, JwtAuthFilter.class)
+            // Les deux filtres sont placés avant le filtre canonique Spring Security
+            // UsernamePasswordAuthenticationFilter (on ne peut pas référencer un filtre
+            // custom comme cible). L'ordre relatif entre eux n'importe pas pour la
+            // correction : rate-limit ne s'active que sur POST /api/auth/login (qui n'a
+            // pas de header Authorization), et jwt ne s'active qu'avec un header.
+            .addFilterBefore(loginRateLimitFilter, UsernamePasswordAuthenticationFilter.class)
             .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();
     }

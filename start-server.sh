@@ -21,8 +21,7 @@ set -e
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 LOG_DIR="$ROOT/logs"
-DATA_DIR="$ROOT/data"
-mkdir -p "$LOG_DIR" "$DATA_DIR"
+mkdir -p "$LOG_DIR"
 
 # ──── Couleurs ────
 C_GREEN='\033[0;32m'; C_YEL='\033[0;33m'; C_RED='\033[0;31m'
@@ -51,8 +50,8 @@ LAN_IP="${LAN_IP:-$(detect_ip)}"
 [ -z "$LAN_IP" ] && LAN_IP="127.0.0.1"
 
 # ──── Variables par défaut (overridable via .env) ────
-export SPRING_PROFILES_ACTIVE="${SPRING_PROFILES_ACTIVE:-sqlite}"
-export SQLITE_PATH="${SQLITE_PATH:-$DATA_DIR/kidzpos.db}"
+# DB PostgreSQL (DB_HOST / DB_PORT / DB_NAME / DB_USER / DB_PASSWORD) :
+#   valeurs par défaut côté backend (cf application.yml). À override via .env en prod.
 export SERVER_PORT="${SERVER_PORT:-8080}"
 FRONTEND_PORT="${FRONTEND_PORT:-3000}"
 
@@ -183,12 +182,12 @@ cleanup() {
 trap cleanup INT TERM
 
 # ──── 6. Démarrer backend ────
-say "Démarrage backend (profil ${SPRING_PROFILES_ACTIVE}, port ${SERVER_PORT})…"
+say "Démarrage backend (PostgreSQL, port ${SERVER_PORT})…"
 java -jar "$JAR" > "$LOG_DIR/backend.log" 2>&1 &
 BACK_PID=$!
 echo "$BACK_PID" > "$BACK_PID_FILE"
 
-# Wait ready (max 90s, le 1er boot SQLite peut prendre 30-60s)
+# Wait ready (max 90s — Spring Boot + Flyway peuvent prendre 20-40s au 1er boot)
 WAIT=0; MAX=90
 until curl -s -f -m 1 "http://localhost:${SERVER_PORT}/actuator/health" >/dev/null 2>&1; do
   WAIT=$((WAIT+1))
@@ -248,7 +247,7 @@ printf "║    admin@kidzpos.com / %-32s  ║\n" "${KIDZPOS_ADMIN_PASSWORD}"
 printf "║    sarah@kidzpos.com / %-32s  ║\n" "${KIDZPOS_SARAH_PASSWORD}"
 printf "║    karim@kidzpos.com / %-32s  ║\n" "${KIDZPOS_KARIM_PASSWORD}"
 printf "║                                                          ║\n"
-printf "║  ${C_CYAN}Profil DB${C_RST}    : %-37s ║\n" "${SPRING_PROFILES_ACTIVE}"
+printf "║  ${C_CYAN}Base${C_RST}         : PostgreSQL %-30s ║\n" "(${DB_HOST:-localhost}:${DB_PORT:-5432}/${DB_NAME:-kidzpos})"
 printf "║  ${C_CYAN}Logs${C_RST}         : logs/backend.log + logs/frontend.log    ║\n"
 printf "║                                                          ║\n"
 printf "║  ${C_YEL}Ctrl+C pour arrêter${C_RST}                                     ║\n"

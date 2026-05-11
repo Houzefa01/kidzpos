@@ -1,18 +1,33 @@
 server:
   port: ${SERVER_PORT:8080}
   address: 0.0.0.0       # écoute sur toutes les interfaces (LAN)
+  tomcat:
+    accesslog:
+      enabled: true
+      # Chemin absolu requis : Tomcat résout les chemins relatifs depuis catalina.base
+      # (un tmp dir pour Spring Boot embarqué), pas depuis le CWD.
+      directory: ${TOMCAT_ACCESSLOG_DIR:/home/Hsavatra/Bureau/sync-till-genius-main/logs}
+      prefix: access
+      suffix: .log
+      buffered: false           # flush immédiat pour monitoring temps réel
+      pattern: '%t %a "%r" %s %b %D ms'
+      rotate: false
 
 spring:
   application:
     name: kidzpos-backend
-  profiles:
-    active: ${SPRING_PROFILES_ACTIVE:postgres}
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:kidzpos}
+    username: ${DB_USER:kidzpos}
+    password: ${DB_PASSWORD:kidzpos}
+    driver-class-name: org.postgresql.Driver
   jpa:
     hibernate:
       ddl-auto: validate  # Use Flyway for schema management, not Hibernate auto-ddl
     open-in-view: false
     properties:
       hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
         jdbc:
           time_zone: UTC
   flyway:
@@ -48,45 +63,3 @@ kidzpos:
   exchange:
     # Taux EUR -> Ariary par défaut (mis à jour si internet via /api/exchange/refresh)
     eur-to-ar-default: 4900
-
----
-spring:
-  config:
-    activate:
-      on-profile: postgres
-  datasource:
-    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:kidzpos}
-    username: ${DB_USER:kidzpos}
-    password: ${DB_PASSWORD:kidzpos}
-    driver-class-name: org.postgresql.Driver
-  jpa:
-    properties:
-      hibernate:
-        dialect: org.hibernate.dialect.PostgreSQLDialect
-  flyway:
-    locations: classpath:db/migration
-
----
-spring:
-  config:
-    activate:
-      on-profile: sqlite
-  datasource:
-    url: jdbc:sqlite:${SQLITE_PATH:./kidzpos.db}?journal_mode=WAL&synchronous=NORMAL&busy_timeout=5000
-    driver-class-name: org.sqlite.JDBC
-    hikari:
-      maximum-pool-size: 1        # SQLite : une seule connexion simultanée
-      minimum-idle: 1
-      connection-timeout: 10000   # 10s avant de déclarer timeout
-      idle-timeout: 600000
-  sql:
-    init:
-      mode: never
-  jpa:
-    hibernate:
-      ddl-auto: update  # Conserve les données entre redémarrages (mono-poste prod LAN)
-    properties:
-      hibernate:
-        dialect: org.hibernate.community.dialect.SQLiteDialect
-  flyway:
-    enabled: false

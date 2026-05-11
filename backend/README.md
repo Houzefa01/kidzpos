@@ -11,8 +11,8 @@ Fonctionne en LAN (sans Internet), sur Internet, et même quand le serveur tombe
 ┌──────────────┐   LAN/Internet    ┌────────────────────┐
 │  Caisse 1    │ ───── HTTPS ────► │  Backend Spring    │
 │  (PWA React) │ ◄──── SSE ──────  │  + PostgreSQL      │
-└──────────────┘                   │  (ou SQLite)       │
-┌──────────────┐                   └────────────────────┘
+└──────────────┘                   └────────────────────┘
+┌──────────────┐
 │  Caisse 2    │ ◄── tous les changements diffusés
 │  (PWA React) │     en temps réel via SSE
 └──────────────┘
@@ -20,7 +20,7 @@ Fonctionne en LAN (sans Internet), sur Internet, et même quand le serveur tombe
 
 - **Frontend** : React + Vite (PWA installable, fonctionne offline)
 - **Backend** : Spring Boot 3.3 + JWT + JPA
-- **Base** : PostgreSQL (recommandé multi-poste) ou SQLite (mono-poste)
+- **Base** : PostgreSQL 14+ (obligatoire — seul SGBD supporté)
 - **Sync temps réel** : Server-Sent Events (`/api/events/stream`)
 - **Mode offline** : chaque poste garde un cache localStorage + file d'attente (outbox) qui se vide dès que le serveur revient
 
@@ -30,10 +30,10 @@ Fonctionne en LAN (sans Internet), sur Internet, et même quand le serveur tombe
 
 ### Pré-requis sur le PC "serveur"
 - Java 17+ ([https://adoptium.net](https://adoptium.net))
-- PostgreSQL 14+ (option recommandée) **ou** rien (SQLite intégré)
+- **PostgreSQL 14+** (obligatoire — le backend refuse de démarrer sans)
 - Node 18+ et `bun` ou `npm` (pour builder le frontend une fois)
 
-### 2.1 — Préparer la base PostgreSQL (option A)
+### 2.1 — Préparer la base PostgreSQL
 
 ```bash
 sudo -u postgres psql
@@ -47,12 +47,10 @@ GRANT ALL PRIVILEGES ON DATABASE kidzpos TO kidzpos;
 
 ```bash
 cd backend
-# Profil PostgreSQL (défaut)
 ./mvnw spring-boot:run
-
-# OU profil SQLite (zéro install) :
-SPRING_PROFILES_ACTIVE=sqlite ./mvnw spring-boot:run
 ```
+
+Le backend lit la config DB via les variables `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASSWORD` (défauts : `localhost:5432/kidzpos` user `kidzpos`).
 
 Le serveur écoute sur `http://0.0.0.0:8080` (toutes interfaces réseau).
 Trouvez l'IP locale du PC serveur :
@@ -218,5 +216,4 @@ Bouton "Rafraîchir le taux" → essaie le backend, sinon le navigateur, sinon m
 ## 7. Sauvegarde
 
 - **PostgreSQL** : `pg_dump kidzpos > backup.sql` (cron quotidien recommandé)
-- **SQLite** : copier le fichier `kidzpos.db`
 - **Frontend** : Paramètres → "Exporter JSON" (sauvegarde locale du poste)

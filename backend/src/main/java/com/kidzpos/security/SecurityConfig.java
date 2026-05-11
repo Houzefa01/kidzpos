@@ -19,7 +19,8 @@ public class SecurityConfig {
     }
 
     @Bean
-    public SecurityFilterChain filterChain(HttpSecurity http, JwtAuthFilter jwtFilter) throws Exception {
+    public SecurityFilterChain filterChain(HttpSecurity http, JwtAuthFilter jwtFilter,
+                                           LoginRateLimitFilter loginRateLimitFilter) throws Exception {
         http
             .csrf(c -> c.disable())
             .cors(c -> {})
@@ -46,6 +47,7 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.DELETE, "/api/stores/**").hasRole("ADMIN")
                 .anyRequest().authenticated()
             )
+            .addFilterBefore(loginRateLimitFilter, JwtAuthFilter.class)
             .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();
     }

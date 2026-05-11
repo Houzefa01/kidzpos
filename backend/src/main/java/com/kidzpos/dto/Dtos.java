@@ -49,7 +49,9 @@ public class Dtos {
             @NotNull PaymentMode paymentMode,
             Double amountPaid,
             String customerId,
-            @PositiveOrZero int pointsRedeemed
+            @PositiveOrZero int pointsRedeemed,
+            // Devise affichée au client ("AR" | "EUR"). Optionnel : défaut 'AR' côté serveur.
+            String currency
     ) {}
 
     public record RefundReq(@NotBlank String saleId) {}

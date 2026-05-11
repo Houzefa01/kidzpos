@@ -38,6 +38,8 @@ export default function POS() {
   const [redeemPoints, setRedeemPoints] = useState(0);
   const [paymentMode, setPaymentMode] = useState<PaymentMode>("CASH");
   const [amountPaid, setAmountPaid] = useState<number>(0);
+  // Devise affichée au client pour CETTE vente. Default = devise globale.
+  const [saleCurrency, setSaleCurrency] = useState<"AR" | "EUR">(settings.currency);
   const [quickOpen, setQuickOpen] = useState(false);
   const [showHotkeys, setShowHotkeys] = useState(false);
 
@@ -145,6 +147,7 @@ export default function POS() {
       paymentMode,
       amountPaid: paymentMode === "CASH" ? amountPaid : total,
       change,
+      currency: saleCurrency,
     });
     if (customer) applyPurchase(customer.id, total, pointsEarned, usedPoints);
     setReceipt(sale);
@@ -359,6 +362,17 @@ export default function POS() {
             </Select>
           </div>
 
+          <div className="flex items-center justify-between gap-2 text-sm">
+            <span className="text-muted-foreground">Devise affichée</span>
+            <Select value={saleCurrency} onValueChange={(v: "AR" | "EUR") => setSaleCurrency(v)}>
+              <SelectTrigger className="h-7 w-32"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="AR">Ariary (Ar)</SelectItem>
+                <SelectItem value="EUR">Euro (€)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
           {paymentMode === "CASH" && (
             <div className="space-y-1">
               <div className="flex items-center justify-between text-sm">
@@ -444,26 +458,26 @@ export default function POS() {
                 {receipt.items.map((i) => (
                   <div key={i.productId} className="flex justify-between text-xs">
                     <span>{i.quantity}× {i.name}</span>
-                    <span>{fmt(i.price * i.quantity)}</span>
+                    <span>{fmt(i.price * i.quantity, receipt.currency)}</span>
                   </div>
                 ))}
               </div>
               <div className="space-y-1 py-2 text-xs">
-                <div className="flex justify-between"><span>Sous-total</span><span>{fmt(receipt.subtotal)}</span></div>
-                {receipt.discount > 0 && <div className="flex justify-between"><span>Remise</span><span>-{fmt(receipt.discount)}</span></div>}
-                {receipt.pointsRedeemed > 0 && <div className="flex justify-between text-warning"><span>Points utilisés ({receipt.pointsRedeemed})</span><span>-{fmt(receipt.pointsRedeemed * settings.euroPerPoint)}</span></div>}
-                <div className="flex justify-between"><span>TVA ({receipt.taxRate}%)</span><span>{fmt(receipt.tax)}</span></div>
-                <div className="flex justify-between border-t border-dashed border-border pt-1 font-bold text-base text-primary"><span>TOTAL</span><span>{fmt(receipt.total)}</span></div>
+                <div className="flex justify-between"><span>Sous-total</span><span>{fmt(receipt.subtotal, receipt.currency)}</span></div>
+                {receipt.discount > 0 && <div className="flex justify-between"><span>Remise</span><span>-{fmt(receipt.discount, receipt.currency)}</span></div>}
+                {receipt.pointsRedeemed > 0 && <div className="flex justify-between text-warning"><span>Points utilisés ({receipt.pointsRedeemed})</span><span>-{fmt(receipt.pointsRedeemed * settings.euroPerPoint, receipt.currency)}</span></div>}
+                <div className="flex justify-between"><span>TVA ({receipt.taxRate}%)</span><span>{fmt(receipt.tax, receipt.currency)}</span></div>
+                <div className="flex justify-between border-t border-dashed border-border pt-1 font-bold text-base text-primary"><span>TOTAL</span><span>{fmt(receipt.total, receipt.currency)}</span></div>
                 <div className="flex justify-between"><span>Paiement</span><span>{receipt.paymentMode === "CASH" ? "Espèces" : receipt.paymentMode === "CARD" ? "Carte" : "Mixte"}</span></div>
                 {receipt.paymentMode === "CASH" && receipt.change != null && receipt.change > 0 && (
-                  <div className="flex justify-between"><span>Rendu</span><span>{fmt(receipt.change)}</span></div>
+                  <div className="flex justify-between"><span>Rendu</span><span>{fmt(receipt.change, receipt.currency)}</span></div>
                 )}
                 {receipt.pointsEarned > 0 && (
                   <div className="flex justify-between text-warning"><span>Points gagnés</span><span>+{receipt.pointsEarned}</span></div>
                 )}
               </div>
               <p className="mt-2 text-center text-xs text-muted-foreground">Merci de votre visite ❤️</p>
-              <div className="mt-4 flex gap-2">
+              <div className="mt-4 flex gap-2 no-print">
                 <Button variant="outline" className="flex-1" onClick={() => window.print()}>
                   <Printer className="mr-2 h-4 w-4" /> Imprimer
                 </Button>

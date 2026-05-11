@@ -12,7 +12,9 @@ export const ProductSchema = z.object({
   price: z.number(),
   stock: z.number(),
   storeId: z.string(),
-  category: z.string().optional(),
+  // .nullish() = string | null | undefined : le backend Postgres renvoie `null`
+  // pour les colonnes nullable, ce que `.optional()` seul rejette.
+  category: z.string().nullish(),
   sku: z.string(),
   createdAt: z.string(),
 });
@@ -37,25 +39,35 @@ export const SaleSchema = z.object({
   discount: z.number(),
   total: z.number(),
   date: z.string(),
-  customerId: z.string().optional(),
-  customerName: z.string().optional(),
+  customerId: z.string().nullish(),
+  customerName: z.string().nullish(),
   pointsEarned: z.number(),
   pointsRedeemed: z.number(),
   paymentMode: z.enum(["CASH", "CARD", "MIXED"]),
-  amountPaid: z.number().optional(),
-  change: z.number().optional(),
-  refundedFrom: z.string().optional(),
+  amountPaid: z.number().nullish(),
+  change: z.number().nullish(),
+  refundedFrom: z.string().nullish(),
+  currency: z.enum(["AR", "EUR"]).default("AR"),
 });
 
 export const CustomerSchema = z.object({
   id: z.string(),
-  name: z.string().optional(),
-  phone: z.string().optional(),
-  email: z.string().optional(),
+  name: z.string().nullish(),
+  phone: z.string().nullish(),
+  email: z.string().nullish(),
   points: z.number(),
   totalSpent: z.number(),
   visits: z.number(),
   createdAt: z.string(),
+});
+
+export const UserSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  email: z.string(),
+  role: z.enum(["ADMIN", "EMPLOYEE"]),
+  storeId: z.string().nullish(),
+  active: z.boolean(),
 });
 
 export const SettingsSchema = z.object({

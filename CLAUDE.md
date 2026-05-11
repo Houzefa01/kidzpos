@@ -1,0 +1,255 @@
+# CLAUDE.md — KidzPOS
+
+Application POS offline-first pour une chaîne de magasins (contexte Madagascar, devise Ariary).
+Architecture : SPA React → REST/SSE → Spring Boot → PostgreSQL.
+
+---
+
+## Stack technique réel
+
+### Frontend
+| Outil | Rôle |
+|---|---|
+| React 18 + TypeScript 5.8 | SPA |
+| Vite 8 + `@vitejs/plugin-react-swc` | Bundler (port dev 8080 — conflit avec backend si les deux tournent) |
+| Zustand 5 + `persist` middleware | État global persisté en localStorage |
+| React Router DOM v6 | Routing (lazy loading via `React.lazy`) |
+| shadcn/ui (Radix UI) | Composants UI (toute la bibliothèque installée) |
+| Tailwind CSS 3 | Styles utilitaires |
+| Zod 4 | Validation + parsing des réponses backend |
+| TanStack Query v5 | QueryClient présent, mais les stores Zustand font le vrai travail |
+| Sonner | Toasts (`toast.success/error` depuis `sonner`) |
+| Recharts | Graphiques Dashboard |
+| jsPDF | Génération reçus PDF |
+| Vitest | Tests unitaires (setup quasi vide) |
+
+### Backend
+| Outil | Rôle |
+|---|---|
+| Spring Boot 3.3.4 / Java 17 | Web, Security, Data JPA, Actuator, Validation |
+| PostgreSQL | Seule BDD supportée (pas de SQLite, pas de H2 en prod) |
+| Flyway | Migrations (V1–V3 dans `backend/src/main/resources/db/migration/`) |
+| JJWT 0.12.6 | JWT stateless, expiration 12h |
+| Lombok | `@Builder @Getter @Setter @NoArgsConstructor @AllArgsConstructor` sur toutes les entités |
+| BCrypt | Hachage mots de passe via Spring Security |
+
+---
+
+## Structure des dossiers
+
+```
+.
+├── backend/                          # Spring Boot
+│   └── src/main/java/com/kidzpos/
+│       ├── config/                   # CorsConfig, DataInitializer
+│       ├── domain/                   # Entités JPA (Sale, Product, User…)
+│       ├── dto/Dtos.java             # Tous les records request/response dans UN seul fichier
+│       ├── events/EventBus.java      # SSE broadcast
+│       ├── repo/                     # Repositories Spring Data
+│       ├── security/                 # JwtService, JwtAuthFilter, SecurityConfig
+│       └── web/                      # Controllers REST (un par domaine)
+│   └── src/main/resources/
+│       ├── application.yml           # Config complète avec ${ENV_VAR:default}
+│       └── db/migration/             # Flyway V1__*, V2__*, V3__*
+│
+├── src/                              # React SPA
+│   ├── App.tsx                       # Router, QueryClientProvider, lazy pages
+│   ├── main.tsx                      # Entry point
+│   ├── index.css                     # Design system HSL, tokens Tailwind
+│   ├── components/
+│   │   ├── ui/                       # shadcn/ui (NE PAS modifier manuellement)
+│   │   ├── AppLayout.tsx             # Layout principal + RequireRole
+│   │   ├── AppSidebar.tsx            # Navigation
+│   │   └── OfflineBanner.tsx         # Indicateur hors-ligne + outbox pending
+│   ├── pages/                        # POS, Sales, Stock, Settings, Customers, Users, Dashboard, Login
+│   ├── store/                        # Zustand stores (auth, data, settings, exchange, backend, customers)
+│   ├── lib/
+│   │   ├── apiClient.ts              # fetch wrapper, tokenStore, ApiError, pingBackend
+│   │   ├── apiConfig.ts              # URL backend configurable
+│   │   ├── outbox.ts                 # File offline (localStorage, max 500 entrées)
+│   │   ├── sse.ts                    # EventSource avec reconnexion exponentielle
+│   │   ├── syncBackend.ts            # hydrateFromBackend() — peuple tous les stores
+│   │   ├── schemas.ts                # Schemas Zod miroir des DTOs Java
+│   │   ├── money.ts                  # formatMoney() + useFormatMoney() hook
+│   │   ├── crypto.ts                 # hashPassword / verifyPassword (SubtleCrypto)
+│   │   ├── pdf.ts                    # downloadReceiptPdf / downloadSalesReportPdf
+│   │   ├── sync.ts                   # broadcastSync() — BroadcastChannel entre onglets
+│   │   └── preload.ts                # Préchargement des pages lazy
+│   └── hooks/                        # useDebouncedValue, useHotkeys, useOnlineStatus, use-mobile, use-toast
+│
+├── .env.example                      # Variables d'environnement (toutes optionnelles)
+├── start-server.sh                   # Script LAN : build + démarrage backend + frontend statique
+├── CLAUDE.md                         # Ce fichier
+└── TODO_FUTURE.md                    # Dette technique documentée
+```
+
+---
+
+## Commandes utiles
+
+```bash
+# Frontend
+npm install          # ou npm ci (CI)
+npm run dev          # dev server sur :8080 (vite.config.ts — port 8080 configuré)
+npm run build        # build prod dans dist/
+npm run test         # vitest run
+npm run lint         # eslint
+
+# Backend (depuis backend/)
+mvn package -DskipTests        # build JAR
+mvn package                    # build + tests
+java -jar target/kidzpos-backend-1.0.0.jar   # démarrer
+
+# Serveur LAN complet
+./start-server.sh              # build + backend :8080 + frontend statique :3000
+./start-server.sh stop
+./start-server.sh status
+./start-server.sh rebuild      # force rebuild JAR + dist/
+
+# PostgreSQL (requis avant démarrage backend)
+# Voir backend/README.md § 2.1
+```
+
+---
+
+## Architecture offline-first — à comprendre avant de modifier
+
+### Flux d'une mutation
+
+1. **Store Zustand** applique le changement **immédiatement** en local
+2. `pushMutation(path, method, body, ref)` tente l'appel REST
+3. Si LAN injoignable → enfilé dans `outbox` (localStorage)
+4. `startBackendWatcher()` pulse toutes les 5s (offline) / 30s (online)
+5. Au retour du backend → `flushOutbox()` rejoue dans l'ordre
+
+### Synchronisation multi-caisses
+
+- Backend publie un événement SSE `change` après chaque mutation
+- Toutes les caisses connectées reçoivent l'event → `hydrateFromBackend()` (re-fetch complet)
+- SSE avec reconnexion exponentielle (2s→30s) + détection zombie (90s sans ping)
+
+### Idempotence
+
+- Les ventes envoient `clientSaleId` = ID local généré côté client
+- Le backend retourne la vente existante si `clientSaleId` déjà connu (replay outbox safe)
+
+### Bus d'événements DOM (communication inter-modules)
+
+Plutôt que prop drilling ou React context, les modules communiquent via `window.dispatchEvent` :
+
+| Événement | Émetteur | Récepteur | Déclencheur |
+|---|---|---|---|
+| `auth:session-expired` | `apiClient.ts` (sur 401) | `AppLayout.tsx` | Redirect `/login` sans hard reload |
+| `outbox:change` | `outbox.ts` (chaque mutation) | `backend.ts` | Rafraîchit `pendingCount` |
+| `api-url:change` | `Settings.tsx` | `backend.ts` | Coupe SSE + re-pulse avec nouvelle URL |
+
+En plus : `visibilitychange` (natif) capturé par `backend.ts` pour re-pulser quand l'onglet redevient visible (sortie de veille).
+
+### Séquence de démarrage précise
+
+```
+main.tsx : createRoot().render(<App />)
+  └─ queueMicrotask()              ← attend la réhydratation Zustand depuis localStorage
+       ├─ startBackendWatcher()    ← pulse() immédiat puis schedule (5s/30s)
+       │    └─ hydrateFromBackend()  ← si backend joignable
+       │         └─ startSse()       ← SSE démarre APRÈS la première hydratation réussie
+       └─ useExchange.refresh()    ← si navigator.onLine
+```
+
+**Pourquoi `queueMicrotask` ?** Sans ce délai, `hydrateFromBackend()` écraserait les données offline avant que Zustand ait pu les charger depuis localStorage.
+
+---
+
+## Conventions de code observées
+
+### TypeScript / React
+
+- **Pas de commentaires sauf WHY non-évident** : les noms de variables documentent le QUOI
+- Imports : alias `@/` pour `src/` (configuré dans `tsconfig.app.json` et `vite.config.ts`)
+- Pages exportées en `export default function NomPage()`
+- Composants UI : shadcn importés depuis `@/components/ui/`
+- `toast.success()` / `toast.error()` via `sonner` (pas le hook shadcn toast)
+- Money : **toujours en EUR** en interne, affiché via `useFormatMoney()` ou `formatMoney()`
+- IDs générés client-side : pattern `p${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+- `useMemo` systématique pour les listes filtrées
+- `useHotkeys` pour les raccourcis POS (F2, F9, Escape)
+
+### Zustand
+
+- Stores créés avec `create<T>()(persist(…, { name: "kidzpos-*", version: N }))`)
+- Migrations de schema via `migrate(persisted, version)` dans les options persist
+- **Jamais** de `useState`/`useEffect` pour ce que Zustand peut faire (cf. M6)
+- `broadcastSync("kidzpos-*")` après chaque mutation (sync entre onglets)
+
+### Zod
+
+- Schemas dans `src/lib/schemas.ts` miroir exact des DTOs Java
+- `.nullish()` pour les champs nullable Postgres (pas `.optional()` seul)
+- `.default()` pour les champs avec valeur par défaut backend
+
+### Java / Spring Boot
+
+- **Pas de service layer** : logique métier directement dans les controllers
+- Tous les DTOs dans **un seul fichier** `Dtos.java` (records Java)
+- Injection par constructeur uniquement (pas `@Autowired`)
+- `@Builder @Getter @Setter @NoArgsConstructor @AllArgsConstructor` sur toutes les entités
+- `@Valid` sur tous les `@RequestBody`
+- `@AuthenticationPrincipal AuthPrincipal me` pour accéder à l'utilisateur courant
+- `TransactionTemplate` programmatique (pas `@Transactional` déclaratif dans SaleController, à cause des retries) — **exception** : `SettingsController.update()` utilise `@Transactional` car pas de retry
+- `ResponseEntity<?>` comme type de retour des endpoints mutants
+- Roles : `ADMIN` et `EMPLOYEE` (Spring Security `hasRole("ADMIN")`)
+- `Settings` : singleton en base avec `id=1L` fixe — `repo.findById(1L).orElseThrow()` partout
+- **DEV uniquement** : `auth.ts` pré-charge 3 seed users et leurs passwords via `import.meta.env.DEV` — absent en production
+
+---
+
+## Règles à respecter
+
+1. **Ne jamais stocker de mots de passe en clair dans l'outbox** — addUser et setPassword exigent `lanReachable: true`
+2. **Ne jamais modifier les fichiers `src/components/ui/`** — générés par shadcn, à régénérer via CLI shadcn si besoin
+3. **Tout nouveau endpoint backend doit être dans `SecurityConfig`** — par défaut `.anyRequest().authenticated()`
+4. **Tout nouveau store Zustand doit incrémenter `version`** et fournir une migration si le schema change
+5. **Tout nouveau schema de réponse backend doit avoir son Zod schema dans `schemas.ts`**
+6. **Money : jamais `BigDecimal` côté Java sans changer le type TS** — actuellement `double`/`number`
+7. **Les migrations Flyway sont irréversibles** — nommer en `V{n+1}__description.sql` avec `IF NOT EXISTS`
+8. **`pushMutation` est le seul point d'entrée pour les mutations CRUD** — `api()` ne s'appelle directement que pour les opérations hors-outbox : login (`auth.ts`) et refresh taux de change (`exchange.ts`)
+
+---
+
+## Fichiers / dossiers à ne jamais modifier sans confirmation
+
+| Chemin | Raison |
+|---|---|
+| `src/components/ui/` | Géré par shadcn — régénérer via CLI, pas manuellement |
+| `backend/src/main/resources/db/migration/V1__*.sql` | Migration initiale en production — toute correction = nouvelle migration |
+| `.claude/settings.local.json` | Permissions Claude Code — modifier via `/update-config` |
+| `bun.lockb` / `package-lock.json` | Lockfiles — ne pas modifier manuellement |
+| `backend/target/` | Artefacts compilés — ignorés par git |
+| `dist/` | Build frontend — ignoré par git |
+
+---
+
+## Variables d'environnement clés
+
+Toutes optionnelles (valeurs par défaut dans `application.yml` et `start-server.sh`) :
+
+| Variable | Défaut | Usage |
+|---|---|---|
+| `JWT_SECRET` | Généré aléatoirement | Signer les tokens JWT (invalide les tokens au restart si non fixé) |
+| `DB_HOST/PORT/NAME/USER/PASSWORD` | `localhost:5432/kidzpos/kidzpos` | PostgreSQL |
+| `SERVER_PORT` | `8080` | Port backend |
+| `FRONTEND_PORT` | `3000` | Port frontend statique (start-server.sh) |
+| `CORS_ALLOWED_ORIGINS` | Plages LAN privées | CORS (forcer en prod HTTPS) |
+| `KIDZPOS_ADMIN/SARAH/KARIM_PASSWORD` | UUID généré au 1er boot | Mots de passe initiaux (DB vide uniquement) |
+
+---
+
+## Dette technique connue (TODO_FUTURE.md)
+
+- SSE `/api/events/stream` sans authentification (M5 — EventSource ne peut pas envoyer de header)
+- Pas de rate-limiting sur `/api/auth/login` (M3)
+- Hard-delete sur `Product` casse l'historique (soft-delete non implémenté)
+- Pas de pagination sur `GET /api/sales`
+- Aucun test d'intégration backend (TestContainers)
+- Types TS non générés depuis les DTOs Java (drift FE/BE possible)
+- Port Vite en dev = 8080 = port backend (collision si les deux tournent localement)

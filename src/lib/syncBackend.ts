@@ -1,4 +1,5 @@
 import { api, tokenStore } from "@/lib/apiClient";
+import { useAuth } from "@/store/auth";
 import { useData } from "@/store/data";
 import { useCustomers } from "@/store/customers";
 import { useSettings } from "@/store/settings";
@@ -10,6 +11,7 @@ import {
   SaleSchema,
   CustomerSchema,
   SettingsSchema,
+  UserSchema,
 } from "@/lib/schemas";
 import { z } from "zod";
 
@@ -25,12 +27,18 @@ export async function hydrateFromBackend(): Promise<{ ok: boolean; error?: strin
   }
   _hydrating = true;
   try {
-    const [rawStores, rawProducts, rawSales, rawCustomers, rawSettings] = await Promise.all([
+    const role = useAuth.getState().user?.role;
+    const userFetch = role === "ADMIN"
+      ? api<unknown>("/api/users").catch(() => null)   // non-bloquant : l'admin peut continuer même si /users plante
+      : Promise.resolve(null);
+
+    const [rawStores, rawProducts, rawSales, rawCustomers, rawSettings, rawUsers] = await Promise.all([
       api<unknown>("/api/stores"),
       api<unknown>("/api/products"),
       api<unknown>("/api/sales"),
       api<unknown>("/api/customers"),
       api<unknown>("/api/settings"),
+      userFetch,
     ]);
 
     const stores = z.array(StoreSchema).parse(rawStores);
@@ -45,6 +53,16 @@ export async function hydrateFromBackend(): Promise<{ ok: boolean; error?: strin
     useData.setState({ stores, products, sales, saleSeq });
     useCustomers.setState({ customers });
     useSettings.setState({ settings });
+
+    if (rawUsers !== null) {
+      // storeId arrive en `null` côté backend → on convertit en `null` strict pour le type User.
+      const users = z.array(UserSchema).parse(rawUsers).map((u) => ({
+        ...u,
+        storeId: u.storeId ?? null,
+      }));
+      useAuth.setState({ users });
+    }
+
     useBackend.setState({ lanReachable: true, lastSync: Date.now() });
     startSse();
     return { ok: true };

@@ -11,6 +11,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.async.AsyncRequestTimeoutException;
 import org.springframework.web.servlet.NoHandlerFoundException;
 
 import java.io.IOException;
@@ -68,6 +69,17 @@ public class GlobalExceptionHandler {
     @ResponseStatus(HttpStatus.OK)
     public void handleClientDisconnect(IOException e) {
         log.debug("Client disconnect (broken pipe / aborted): {}", e.getMessage());
+    }
+
+    /**
+     * Timeout async (typiquement SSE qui dépasse le timeout Tomcat). Le client
+     * EventSource reconnecte automatiquement — pas une erreur applicative.
+     * Idem que broken pipe : pas de body JSON possible (réponse text/event-stream).
+     */
+    @ExceptionHandler(AsyncRequestTimeoutException.class)
+    @ResponseStatus(HttpStatus.OK)
+    public void handleAsyncTimeout(AsyncRequestTimeoutException e) {
+        log.debug("Async request timeout (SSE keepalive expected): {}", e.getMessage());
     }
 
     @ExceptionHandler(Exception.class)

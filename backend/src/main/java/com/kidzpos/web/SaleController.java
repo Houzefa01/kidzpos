@@ -121,6 +121,11 @@ public class SaleController {
                 ? req.clientSaleId()
                 : "sale-" + UUID.randomUUID();
 
+        // Devise demandée par le client → fallback : devise globale du shop.
+        String saleCurrency = (req.currency() != null && !req.currency().isBlank())
+                ? req.currency()
+                : (s.getCurrency() != null ? s.getCurrency() : "AR");
+
         Sale sale = Sale.builder()
                 .id(saleId).seq(seq)
                 .storeId(req.storeId())
@@ -133,6 +138,7 @@ public class SaleController {
                 .paymentMode(req.paymentMode())
                 .amountPaid(req.amountPaid())
                 .change(req.amountPaid() == null ? null : round(req.amountPaid() - total))
+                .currency(saleCurrency)
                 .build();
 
         for (var i : items) { i.setSale(sale); sale.getItems().add(i); }

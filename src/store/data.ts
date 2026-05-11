@@ -30,6 +30,7 @@ export interface SaleItem {
 }
 
 export type PaymentMode = "CASH" | "CARD" | "MIXED";
+export type SaleCurrency = "AR" | "EUR";
 
 export interface Sale {
   id: string;
@@ -52,6 +53,7 @@ export interface Sale {
   amountPaid?: number;
   change?: number;
   refundedFrom?: string;
+  currency: SaleCurrency;
 }
 
 export type StockMoveType = "IN" | "OUT" | "ADJUST" | "TRANSFER" | "SALE" | "REFUND";
@@ -98,90 +100,25 @@ interface DataState {
   transferStock: (productId: string, fromStoreId: string, toStoreId: string, qty: number, by?: { userId: string; userName: string }) => { ok: boolean; error?: string };
   parkCart: (cart: Omit<ParkedCart, "id" | "createdAt">) => void;
   unparkCart: (id: string) => ParkedCart | undefined;
+  addStore: (s: Omit<Store, "id">) => { ok: boolean; error?: string; store?: Store };
   updateStore: (id: string, patch: Partial<Store>) => void;
+  deleteStore: (id: string) => { ok: boolean; error?: string };
   exportAll: () => string;
   importAll: (json: string) => { ok: boolean; error?: string };
   resetAll: () => void;
 }
 
-const seedStores: Store[] = [
-  { id: "s1", name: "Magasin A — Centre Ville", location: "12 Rue des Lilas" },
-  { id: "s2", name: "Magasin B — Marina", location: "45 Av. de la Mer" },
-];
-
-const cats = ["Jouets", "Vêtements", "Accessoires", "Peluches", "Jeux éducatifs"];
-const names = [
-  "Ours en peluche", "Robe été fille", "T-shirt dinosaure", "Voiture télécommandée",
-  "Puzzle 100 pièces", "Bonnet hiver", "Cube magique", "Poupée Lila",
-  "Casque enfant", "Sac à dos école", "Livre coloriage", "Trottinette pliable",
-];
-
-const buildSeedProducts = (): Product[] => {
-  const out: Product[] = [];
-  let idx = 0;
-  const now = Date.now();
-  for (const storeId of ["s1", "s2"]) {
-    names.forEach((n, i) => {
-      idx++;
-      out.push({
-        id: `p${idx}`,
-        name: n,
-        price: Math.round((9.9 + (i * 7) % 60) * 100) / 100,
-        stock: Math.floor(((i * 13 + (storeId === "s1" ? 3 : 8)) % 30) + 2),
-        storeId,
-        category: cats[i % cats.length],
-        sku: `KZ-${storeId.toUpperCase()}-${100 + i}`,
-        createdAt: new Date(now - idx * 60_000).toISOString(),
-      });
-    });
-  }
-  out[3].stock = 1;
-  out[7].stock = 0;
-  out[15].stock = 2;
-  return out;
-};
-
-const buildSeedSales = (products: Product[]): Sale[] => {
-  const out: Sale[] = [];
-  const now = Date.now();
-  const seqMap: Record<string, number> = { s1: 0, s2: 0 };
-  for (let i = 0; i < 18; i++) {
-    const storeId = i % 2 === 0 ? "s1" : "s2";
-    seqMap[storeId]++;
-    const product = products.find((p) => p.storeId === storeId)!;
-    const qty = (i % 3) + 1;
-    const subtotal = +(product.price * qty).toFixed(2);
-    const tax = +(subtotal * 0.2).toFixed(2);
-    const total = +(subtotal + tax).toFixed(2);
-    out.push({
-      id: `sale-seed-${i}`,
-      seq: seqMap[storeId],
-      storeId,
-      userId: storeId === "s1" ? "u2" : "u3",
-      userName: storeId === "s1" ? "Sarah" : "Karim",
-      items: [{ productId: product.id, name: product.name, quantity: qty, price: product.price }],
-      subtotal, tax, taxRate: 20, discount: 0, total,
-      date: new Date(now - i * 1000 * 60 * 60 * 8).toISOString(),
-      pointsEarned: 0, pointsRedeemed: 0, paymentMode: i % 2 === 0 ? "CASH" : "CARD",
-    });
-  }
-  return out;
-};
-
-const initialProducts = buildSeedProducts();
-const initialSales = buildSeedSales(initialProducts);
-const initialSeq: Record<string, number> = {};
-for (const s of initialSales) initialSeq[s.storeId] = Math.max(initialSeq[s.storeId] ?? 0, s.seq);
-
+// État initial vide : le backend Postgres est l'unique source de vérité.
+// `syncBackend` peuple stores/products/sales/customers au démarrage et via SSE.
 export const useData = create<DataState>()(
   persist(
     (set, get) => ({
-      stores: seedStores,
-      products: initialProducts,
-      sales: initialSales,
+      stores: [],
+      products: [],
+      sales: [],
       moves: [],
       parked: [],
-      saleSeq: initialSeq,
+      saleSeq: {},
 
       addProduct: (p) => {
         const existing = get().products.find(
@@ -261,6 +198,7 @@ export const useData = create<DataState>()(
           amountPaid: sale.amountPaid,
           customerId: sale.customerId,
           pointsRedeemed: sale.pointsRedeemed,
+          currency: sale.currency,
         }, `sale:${full.id}`);
         return full;
       },
@@ -388,11 +326,37 @@ export const useData = create<DataState>()(
         }
         return c;
       },
+      addStore: (input) => {
+        const name = input.name?.trim();
+        const location = input.location?.trim() ?? "";
+        if (!name) return { ok: false, error: "Nom requis" };
+        if (get().stores.some((s) => s.name.toLowerCase() === name.toLowerCase())) {
+          return { ok: false, error: "Un magasin porte déjà ce nom" };
+        }
+        const id = `store-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+        const store: Store = { id, name, location };
+        set((s) => ({ stores: [...s.stores, store] }));
+        broadcastSync("kidzpos-data");
+        pushMutation("/api/stores", "POST", store, `store:${id}`);
+        return { ok: true, store };
+      },
       updateStore: (id, patch) => {
         set((s) => ({ stores: s.stores.map((x) => (x.id === id ? { ...x, ...patch } : x)) }));
         broadcastSync("kidzpos-data");
         const updated = get().stores.find((s) => s.id === id);
         if (updated) pushMutation(`/api/stores/${id}`, "PUT", updated, `store:${id}`);
+      },
+      deleteStore: (id) => {
+        if (get().products.some((p) => p.storeId === id)) {
+          return { ok: false, error: "Magasin contient des produits — supprimer ou transférer d'abord" };
+        }
+        if (get().sales.some((s) => s.storeId === id)) {
+          return { ok: false, error: "Magasin a un historique de ventes — suppression bloquée" };
+        }
+        set((s) => ({ stores: s.stores.filter((x) => x.id !== id) }));
+        broadcastSync("kidzpos-data");
+        pushMutation(`/api/stores/${id}`, "DELETE", undefined, `store:${id}`);
+        return { ok: true };
       },
       exportAll: () => JSON.stringify({
         stores: get().stores, products: get().products, sales: get().sales,
@@ -410,20 +374,17 @@ export const useData = create<DataState>()(
         } catch (e: unknown) { return { ok: false, error: e instanceof Error ? e.message : "Erreur" }; }
       },
       resetAll: () => {
-        const ps = buildSeedProducts();
-        const ss = buildSeedSales(ps);
-        const seq: Record<string, number> = {};
-        for (const s of ss) seq[s.storeId] = Math.max(seq[s.storeId] ?? 0, s.seq);
-        set({ stores: seedStores, products: ps, sales: ss, moves: [], parked: [], saleSeq: seq });
+        // Vide l'état local : le prochain syncBackend réhydratera depuis Postgres.
+        set({ stores: [], products: [], sales: [], moves: [], parked: [], saleSeq: {} });
         broadcastSync("kidzpos-data");
       },
     }),
     {
       name: "kidzpos-data",
-      version: 3,
+      version: 4,
       migrate: (persisted: unknown, version) => {
         if (!persisted || typeof persisted !== "object") return persisted;
-        const state = persisted as Record<string, unknown[]>;
+        const state = persisted as Record<string, unknown>;
         if (version < 2) {
           state.products = ((state.products ?? []) as Record<string, unknown>[]).map((p) => ({
             ...p,
@@ -441,13 +402,23 @@ export const useData = create<DataState>()(
         if (version < 3) {
           const seq: Record<string, number> = {};
           state.sales = ((state.sales ?? []) as Record<string, unknown>[]).map((s) => {
-            const storeId = s.storeId as string;
+            const storeId = (s as Record<string, unknown>).storeId as string;
             seq[storeId] = (seq[storeId] ?? 0) + 1;
-            return { ...s, seq: (s.seq as number) ?? seq[storeId] };
+            return { ...(s as Record<string, unknown>), seq: ((s as Record<string, unknown>).seq as number) ?? seq[storeId] };
           });
-          (state as Record<string, unknown>).saleSeq = seq;
+          state.saleSeq = seq;
           state.moves = (state.moves ?? []) as unknown[];
           state.parked = (state.parked ?? []) as unknown[];
+        }
+        if (version < 4) {
+          // Suppression des données seed de l'ère SQLite. Postgres est désormais
+          // la source de vérité, syncBackend repeuplera au prochain démarrage.
+          state.stores = [];
+          state.products = [];
+          state.sales = [];
+          state.moves = [];
+          state.parked = [];
+          state.saleSeq = {};
         }
         return state;
       },

@@ -9,20 +9,22 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Download, Upload, RefreshCw, Save, Server, RotateCw, Wifi } from "lucide-react";
+import { Download, Upload, RefreshCw, Save, Server, RotateCw, Wifi, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { getApiUrl, setApiUrl } from "@/lib/apiConfig";
 
 export default function Settings() {
   const { user } = useAuth();
   const { settings, update, reset } = useSettings();
-  const { stores, updateStore, exportAll, importAll, resetAll } = useData();
+  const { stores, addStore, updateStore, deleteStore, exportAll, importAll, resetAll } = useData();
   const { rate, fetchedAt, source, refresh, setManual } = useExchange();
   const { lanReachable, pendingCount } = useBackend();
   const [form, setForm] = useState(settings);
   const [apiUrl, setApiUrlLocal] = useState(getApiUrl());
   const [manualRate, setManualRate] = useState<string>(String(Math.round(rate)));
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [newStoreName, setNewStoreName] = useState("");
+  const [newStoreLocation, setNewStoreLocation] = useState("");
 
   useEffect(() => setForm(settings), [settings]);
 
@@ -175,13 +177,68 @@ export default function Settings() {
 
       <Card className="gradient-card border-border p-6">
         <h2 className="mb-4 font-display text-lg font-bold">Magasins</h2>
+
         <div className="space-y-3">
+          {stores.length === 0 && (
+            <p className="text-sm text-muted-foreground">Aucun magasin. Ajoutez-en un ci-dessous.</p>
+          )}
           {stores.map((s) => (
-            <div key={s.id} className="grid gap-3 sm:grid-cols-2">
-              <Input value={s.name} onChange={(e) => updateStore(s.id, { name: e.target.value })} />
-              <Input value={s.location} onChange={(e) => updateStore(s.id, { location: e.target.value })} />
+            <div key={s.id} className="grid items-center gap-3 sm:grid-cols-[1fr_1fr_auto]">
+              <Input
+                value={s.name}
+                onChange={(e) => updateStore(s.id, { name: e.target.value })}
+                placeholder="Nom"
+              />
+              <Input
+                value={s.location}
+                onChange={(e) => updateStore(s.id, { location: e.target.value })}
+                placeholder="Adresse"
+              />
+              <Button
+                variant="ghost"
+                size="icon"
+                title="Supprimer"
+                onClick={() => {
+                  if (!confirm(`Supprimer le magasin "${s.name}" ?`)) return;
+                  const r = deleteStore(s.id);
+                  if (r.ok) toast.success("Magasin supprimé");
+                  else toast.error(r.error ?? "Suppression impossible");
+                }}
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
             </div>
           ))}
+        </div>
+
+        <div className="mt-5 border-t border-border pt-4">
+          <Label className="mb-2 block">Ajouter un magasin</Label>
+          <div className="grid items-center gap-3 sm:grid-cols-[1fr_1fr_auto]">
+            <Input
+              value={newStoreName}
+              onChange={(e) => setNewStoreName(e.target.value)}
+              placeholder="Nom (ex: Magasin C)"
+            />
+            <Input
+              value={newStoreLocation}
+              onChange={(e) => setNewStoreLocation(e.target.value)}
+              placeholder="Adresse / Ville"
+            />
+            <Button
+              onClick={() => {
+                const r = addStore({ name: newStoreName, location: newStoreLocation });
+                if (r.ok) {
+                  toast.success("Magasin ajouté");
+                  setNewStoreName("");
+                  setNewStoreLocation("");
+                } else {
+                  toast.error(r.error ?? "Ajout impossible");
+                }
+              }}
+            >
+              <Plus className="mr-2 h-4 w-4" /> Ajouter
+            </Button>
+          </div>
         </div>
       </Card>
 

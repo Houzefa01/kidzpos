@@ -41,4 +41,8 @@ public class Sale {
     private Double amountPaid;
     private Double change;
     private String refundedFrom;
+
+    /** Devise affichée au client lors de la vente ("AR" ou "EUR").
+     *  Les montants sont stockés en EUR ; ce champ sert au rendu reçu / historique. */
+    @Column(nullable = false, length = 10) @Builder.Default private String currency = "AR";
 }

@@ -193,14 +193,32 @@ export default function Sales() {
               <hr className="my-2 border-dashed" />
               {viewSale.items.map((i) => (
                 <div key={i.productId} className="flex justify-between text-xs">
-                  <span>{i.quantity}× {i.name}</span><span>{fmt(i.price * i.quantity)}</span>
+                  <span>{i.quantity}× {i.name}</span><span>{fmt(i.price * i.quantity, viewSale.currency)}</span>
                 </div>
               ))}
               <hr className="my-2 border-dashed" />
-              <div className="flex justify-between text-xs"><span>Sous-total</span><span>{fmt(viewSale.subtotal)}</span></div>
-              {viewSale.discount !== 0 && <div className="flex justify-between text-xs"><span>Remise</span><span>{fmt(viewSale.discount)}</span></div>}
-              <div className="flex justify-between text-xs"><span>TVA ({viewSale.taxRate}%)</span><span>{fmt(viewSale.tax)}</span></div>
-              <div className="flex justify-between text-base font-bold"><span>TOTAL</span><span>{fmt(viewSale.total)}</span></div>
+              <div className="flex justify-between text-xs"><span>Sous-total</span><span>{fmt(viewSale.subtotal, viewSale.currency)}</span></div>
+              {viewSale.discount !== 0 && <div className="flex justify-between text-xs"><span>Remise</span><span>-{fmt(viewSale.discount, viewSale.currency)}</span></div>}
+              {viewSale.pointsRedeemed > 0 && (
+                <div className="flex justify-between text-xs text-warning">
+                  <span>Points utilisés ({viewSale.pointsRedeemed})</span>
+                  <span>-{fmt(viewSale.pointsRedeemed * settings.euroPerPoint, viewSale.currency)}</span>
+                </div>
+              )}
+              <div className="flex justify-between text-xs"><span>TVA ({viewSale.taxRate}%)</span><span>{fmt(viewSale.tax, viewSale.currency)}</span></div>
+              <div className="flex justify-between text-base font-bold"><span>TOTAL</span><span>{fmt(viewSale.total, viewSale.currency)}</span></div>
+              <div className="flex justify-between text-xs">
+                <span>Paiement</span>
+                <span>{viewSale.paymentMode === "CASH" ? "Espèces" : viewSale.paymentMode === "CARD" ? "Carte" : "Mixte"}</span>
+              </div>
+              {viewSale.paymentMode === "CASH" && viewSale.change != null && viewSale.change > 0 && (
+                <div className="flex justify-between text-xs"><span>Rendu</span><span>{fmt(viewSale.change, viewSale.currency)}</span></div>
+              )}
+              {viewSale.pointsEarned > 0 && (
+                <div className="flex justify-between text-xs text-warning">
+                  <span>Points gagnés</span><span>+{viewSale.pointsEarned}</span>
+                </div>
+              )}
               <div className="mt-3 flex gap-2 no-print">
                 <Button variant="outline" className="flex-1" onClick={() => window.print()}><Printer className="mr-2 h-4 w-4" /> Imprimer</Button>
                 <Button variant="outline" className="flex-1" onClick={() => downloadReceiptPdf(viewSale, stores.find((x) => x.id === viewSale.storeId), settings)}><FileText className="mr-2 h-4 w-4" /> PDF</Button>

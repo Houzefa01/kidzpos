@@ -33,8 +33,11 @@ export function currencySymbol(): string {
 export function useFormatMoney() {
   const currency = useSettings((s) => s.settings.currency);
   const rate = useExchange((s) => s.rate);
-  return (amountEur: number) => {
-    if (currency === "AR") return `${fmtAr.format(Math.round(amountEur * rate))} Ar`;
+  // `override` permet d'afficher un montant dans la devise figée d'une vente passée
+  // (cf. Sale.currency), indépendamment du réglage global courant.
+  return (amountEur: number, override?: "AR" | "EUR") => {
+    const cur = override ?? currency;
+    if (cur === "AR") return `${fmtAr.format(Math.round(amountEur * rate))} Ar`;
     return `${fmtEur.format(amountEur)} €`;
   };
 }

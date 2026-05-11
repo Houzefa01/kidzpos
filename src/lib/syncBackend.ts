@@ -64,7 +64,7 @@ export async function hydrateFromBackend(): Promise<{ ok: boolean; error?: strin
     }
 
     useBackend.setState({ lanReachable: true, lastSync: Date.now() });
-    startSse();
+    void startSse();
     return { ok: true };
   } catch (e: unknown) {
     const status = (e as { status?: number })?.status;

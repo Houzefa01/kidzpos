@@ -29,7 +29,7 @@ export const useBackend = create<BackendState>((set, get) => ({
         import("@/lib/syncBackend")
           .then(({ hydrateFromBackend }) => hydrateFromBackend())
           .catch(() => {})
-          .finally(() => startSse());
+          .finally(() => { void startSse(); });
       } else {
         stopSse();
       }

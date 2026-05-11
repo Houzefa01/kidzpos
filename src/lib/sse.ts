@@ -1,3 +1,4 @@
+import { api } from "@/lib/apiClient";
 import { getApiUrl } from "@/lib/apiConfig";
 import { hydrateFromBackend } from "@/lib/syncBackend";
 import { useBackend } from "@/store/backend";
@@ -36,16 +37,20 @@ function startHeartbeatMonitor() {
     // (le backend ping toutes les 30s, on tolère 3 manqués)
     if (Date.now() - lastHeartbeatAt > 90_000) {
       stopSse();
-      retryTimer = window.setTimeout(startSse, 1000);
+      retryTimer = window.setTimeout(() => { void startSse(); }, 1000);
     }
   }, 30_000);
 }
 
-export function startSse() {
+export async function startSse() {
   if (es && (es.readyState === EventSource.OPEN || es.readyState === EventSource.CONNECTING)) return;
   stopSse();
   try {
-    es = new EventSource(`${getApiUrl()}/api/events/stream`);
+    // M5 : EventSource ne peut pas envoyer Authorization. On demande un token
+    // single-use (60s) via POST /api/events/auth, qu'on passe en query param.
+    const auth = await api<{ token: string }>("/api/events/auth", { method: "POST" });
+    const url = `${getApiUrl()}/api/events/stream?token=${encodeURIComponent(auth.token)}`;
+    es = new EventSource(url);
     lastHeartbeatAt = Date.now();
     es.onopen = () => {
       retryDelay = 2000;
@@ -59,12 +64,12 @@ export function startSse() {
     es.onerror = () => {
       stopSse();
       retryDelay = Math.min(retryDelay * 1.5, 30_000);
-      retryTimer = window.setTimeout(startSse, retryDelay);
+      retryTimer = window.setTimeout(() => { void startSse(); }, retryDelay);
     };
   } catch (_e) {
     es = null;
     retryDelay = Math.min(retryDelay * 1.5, 30_000);
-    retryTimer = window.setTimeout(startSse, retryDelay);
+    retryTimer = window.setTimeout(() => { void startSse(); }, retryDelay);
   }
 }
 

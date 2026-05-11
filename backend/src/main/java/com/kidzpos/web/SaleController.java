@@ -213,7 +213,8 @@ public class SaleController {
                     .quantity(-i.getQuantity()).price(i.getPrice())
                     .sale(refund).build();
             refund.getItems().add(ri);
-            products.findById(i.getProductId()).ifPresent(p -> {
+            // Restock même si le produit a été soft-deleted depuis la vente.
+            products.findByIdIncludingDeleted(i.getProductId()).ifPresent(p -> {
                 p.setStock(p.getStock() + i.getQuantity());
                 products.save(p);
                 moves.save(StockMovement.builder()

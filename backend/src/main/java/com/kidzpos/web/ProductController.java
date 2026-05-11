@@ -60,8 +60,12 @@ public class ProductController {
 
     @DeleteMapping("/{id}")
     public ResponseEntity<?> delete(@PathVariable String id) {
-        if (!repo.existsById(id)) return ResponseEntity.notFound().build();
-        repo.deleteById(id);
+        var p = repo.findById(id).orElse(null);
+        if (p == null) return ResponseEntity.notFound().build();
+        // Soft-delete : préserve l'intégrité référentielle avec sale_items.product_id
+        // (pas de FK mais on garde la trace) et libère le SKU via l'index partiel.
+        p.setDeletedAt(Instant.now());
+        repo.save(p);
         bus.publish("product", "deleted", java.util.Map.of("id", id));
         return ResponseEntity.noContent().build();
     }

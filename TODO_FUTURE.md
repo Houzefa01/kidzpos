@@ -5,19 +5,16 @@ Aucun n'est bloquant pour le fonctionnement actuel.
 
 ## Sécurité — pas de bug actuel mais à durcir
 
-### M3 — Rate limiting backend sur `/api/auth/login`
-**Pourquoi reporté** : nécessite ajout d'une dépendance externe (Bucket4j ou Resilience4j) ⇒ impacte l'architecture. Le front limite déjà à 5 essais/5 min, et BCrypt rend le brute-force coûteux (~100 ms par tentative).
-**Solution proposée** : Bucket4j-Spring-Boot ou filtre custom in-memory `ConcurrentHashMap<IP, AttemptCounter>`.
+### ~~M3 — Rate limiting backend sur `/api/auth/login`~~ — ✅ RÉSOLU
+Filtre `LoginRateLimitFilter` (in-memory `ConcurrentHashMap<IP, Deque<timestamps>>`, fenêtre 5 min / 5 tentatives, seuls les 401 consomment le quota). Pas de nouvelle dépendance.
 
-### M5 — Authentification sur le flux SSE `/api/events/stream`
-**Pourquoi reporté** : `EventSource` natif ne pose pas de header `Authorization`. Solutions possibles : token via query param (à signer/expirer), cookie HttpOnly, ou bibliothèque `event-source-polyfill`. Pas un bug en LAN privé.
-**Solution proposée** : émettre un `eventToken` court (< 1 min) via `/api/events/auth` puis `?token=` sur le stream.
+### ~~M5 — Authentification sur le flux SSE `/api/events/stream`~~ — ✅ RÉSOLU
+`EventTokenStore` émet un UUID single-use 60s via `POST /api/events/auth` (auth JWT) ; `GET /api/events/stream?token=…` consomme avant d'ouvrir l'`SseEmitter`. Le frontend (`sse.ts`) fetch un nouveau token avant chaque connexion.
 
 ## Configuration / DX
 
-### M9 — Vite dev server sur le port 8080 (collision avec backend)
-**Pourquoi reporté** : config dev uniquement, ne touche pas la prod (le frontend est servi en statique en prod via Caddy/nginx).
-**Solution proposée** : `vite.config.ts > server.port = 5173` (défaut Vite).
+### ~~M9 — Vite dev server sur le port 8080 (collision avec backend)~~ — ✅ RÉSOLU
+`vite.config.ts > server.port` passe de `8080` à `5173` (défaut Vite).
 
 ### ~~Dette tsc pré-existante (12 erreurs `--strict` non liées à l'audit)~~ — ✅ RÉSOLU en Phase 5 bonus
 Ces erreurs ont été corrigées via les commits `30c6a7b`, `418c3bf` et la fix Phase 5b.3 (cf `AUDIT_FIXES.md`).
@@ -51,6 +48,6 @@ Ces erreurs ont été corrigées via les commits `30c6a7b`, `418c3bf` et la fix 
 ## Métier
 
 - Numéro de ticket via table `store_seq` dédiée (`UPDATE … RETURNING`) — alternative plus robuste que le retry sur `MAX(seq)+1` (déjà appliqué en Phase 1.3).
-- Soft-delete `Product` (champ `deletedAt`) — actuellement `DELETE` casse l'historique des ventes.
+- ~~Soft-delete `Product`~~ — ✅ RÉSOLU. `@SQLRestriction("deleted_at IS NULL")` + V4 (colonne `deleted_at`, unique partiel `(store_id, sku) WHERE deleted_at IS NULL`). Refund utilise `findByIdIncludingDeleted` (native bypass).
 - Multi-store par utilisateur (un caissier peut basculer).
 - Export comptable PDF mensuel par magasin (conformité fiscale malgache).

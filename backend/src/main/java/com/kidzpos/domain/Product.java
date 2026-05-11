@@ -2,11 +2,20 @@ package com.kidzpos.domain;
 
 import jakarta.persistence.*;
 import lombok.*;
+import org.hibernate.annotations.SQLRestriction;
 
 import java.time.Instant;
 
-@Entity @Table(name = "products",
-    uniqueConstraints = @UniqueConstraint(columnNames = {"storeId", "sku"}))
+/**
+ * @SQLRestriction filtre globalement les produits soft-deleted : tous les
+ * findAll / findById / dérivés JPA ignorent les lignes avec deleted_at != null.
+ * L'unique (store_id, sku) est porté par un index partiel V4 — voir migration.
+ *
+ * Pour les cas qui doivent voir aussi les supprimés (ex: refund d'une vente
+ * d'un produit retiré), utiliser ProductRepository.findByIdIncludingDeleted.
+ */
+@Entity @Table(name = "products")
+@SQLRestriction("deleted_at IS NULL")
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class Product {
     @Id private String id;
@@ -17,4 +26,6 @@ public class Product {
     private String category;
     @Column(nullable = false) private String sku;
     @Column(nullable = false) private Instant createdAt;
+
+    @Column(name = "deleted_at") private Instant deletedAt;
 }

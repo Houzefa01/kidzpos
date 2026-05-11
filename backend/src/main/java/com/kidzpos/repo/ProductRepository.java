@@ -20,4 +20,12 @@ public interface ProductRepository extends JpaRepository<Product, String> {
     @Modifying
     @Query("UPDATE Product p SET p.stock = p.stock - :qty WHERE p.id = :id AND p.stock >= :qty")
     int decrementStockIfAvailable(@Param("id") String id, @Param("qty") int qty);
+
+    /**
+     * Soft-delete bypass : retrouve un produit même si deleted_at != null.
+     * Utilisé par le refund pour restocker un produit retiré du catalogue.
+     * Native query : @SQLRestriction de l'entité ne s'applique qu'aux requêtes JPQL.
+     */
+    @Query(value = "SELECT * FROM products WHERE id = :id", nativeQuery = true)
+    Optional<Product> findByIdIncludingDeleted(@Param("id") String id);
 }

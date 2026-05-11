@@ -127,6 +127,10 @@ java -jar target/kidzpos-backend-1.0.0.jar   # démarrer
 - Backend publie un événement SSE `change` après chaque mutation
 - Toutes les caisses connectées reçoivent l'event → `hydrateFromBackend()` (re-fetch complet)
 - SSE avec reconnexion exponentielle (2s→30s) + détection zombie (90s sans ping)
+- **Handshake authentifié (M5)** : `EventSource` ne peut pas envoyer d'`Authorization`,
+  donc `sse.ts` POST `/api/events/auth` (JWT requis) pour obtenir un UUID single-use
+  60s qu'il passe en `?token=…`. Conséquence : `startSse()` est **async**, ses
+  callers (`syncBackend`, `store/backend`) préfixent l'appel par `void`.
 
 ### Idempotence
 
@@ -169,7 +173,9 @@ main.tsx : createRoot().render(<App />)
 - Pages exportées en `export default function NomPage()`
 - Composants UI : shadcn importés depuis `@/components/ui/`
 - `toast.success()` / `toast.error()` via `sonner` (pas le hook shadcn toast)
-- Money : **toujours en EUR** en interne, affiché via `useFormatMoney()` ou `formatMoney()`
+- Money : **toujours en EUR** en interne. Pour le rendu, deux modes :
+  - `fmt(amount)` → utilise la devise globale courante (`settings.currency`)
+  - `fmt(amount, sale.currency)` → utilise la devise **figée au checkout** de cette vente. Obligatoire sur tous les reçus historiques (POS receipt overlay, Sales detail) sinon un changement de devise globale réécrit visuellement les ventes passées.
 - IDs générés client-side : pattern `p${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
 - `useMemo` systématique pour les listes filtrées
 - `useHotkeys` pour les raccourcis POS (F2, F9, Escape)
@@ -200,6 +206,7 @@ main.tsx : createRoot().render(<App />)
 - Roles : `ADMIN` et `EMPLOYEE` (Spring Security `hasRole("ADMIN")`)
 - `Settings` : singleton en base avec `id=1L` fixe — `repo.findById(1L).orElseThrow()` partout
 - **DEV uniquement** : `auth.ts` pré-charge 3 seed users et leurs passwords via `import.meta.env.DEV` — absent en production
+- **Soft-delete (Product)** : `@SQLRestriction("deleted_at IS NULL")` filtre toutes les requêtes JPQL. `DELETE /api/products/{id}` pose `deletedAt = now()` au lieu de `repo.deleteById`. Une `UNIQUE (store_id, sku)` partielle (`WHERE deleted_at IS NULL`) autorise le recyclage du SKU après suppression. **Gotcha** : `@SQLRestriction` ne s'applique qu'à JPQL — pour les call sites qui DOIVENT voir les supprimés (refund qui restocke un produit retiré), utiliser `ProductRepository.findByIdIncludingDeleted` (native query).
 
 ---
 
@@ -246,9 +253,7 @@ Toutes optionnelles (valeurs par défaut dans `application.yml` et `start-server
 
 ## Dette technique connue (TODO_FUTURE.md)
 
-- SSE `/api/events/stream` sans authentification (M5 — EventSource ne peut pas envoyer de header)
-- Pas de rate-limiting sur `/api/auth/login` (M3)
-- Hard-delete sur `Product` casse l'historique (soft-delete non implémenté)
 - Pas de pagination sur `GET /api/sales`
 - Aucun test d'intégration backend (TestContainers)
 - Types TS non générés depuis les DTOs Java (drift FE/BE possible)
+- Rate-limit login + soft-delete + SSE auth sont in-memory mono-instance — à revoir si on passe multi-backend

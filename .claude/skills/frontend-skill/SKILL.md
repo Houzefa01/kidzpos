@@ -210,9 +210,25 @@ import { Plus, Minus, Trash2, Search, Download, Eye } from "lucide-react";
 ```typescript
 // ✅ Correct : affichage via le hook
 const fmt = useFormatMoney();
-<span>{fmt(product.price)}</span>                     // devise globale
+<span>{fmt(product.price)}</span>                     // devise globale (settings.currency)
 <span>{fmt(sale.total, sale.currency)}</span>          // devise figée de la vente
+```
 
+### Devise figée par-vente (`Sale.currency`)
+
+Chaque vente porte sa devise d'affichage (`"AR"` ou `"EUR"`) choisie au POS,
+indépendamment du réglage global. Les reçus historiques (page Sales,
+réimpression PDF) doivent **toujours** passer `sale.currency` en override :
+
+```tsx
+{fmt(viewSale.total, viewSale.currency)}   // pas {fmt(viewSale.total)}
+```
+
+Sans l'override, un changement de `settings.currency` réécrirait visuellement
+toutes les ventes passées — bug observable sur Sales et POS receipt overlay.
+Les montants stockés (`sale.total` etc.) restent en EUR ; seul le rendu varie.
+
+```typescript
 // ✅ Non-réactif (hors composant)
 import { formatMoney } from "@/lib/money";
 formatMoney(amount);
@@ -329,6 +345,26 @@ let _needsRehydrate = false;
 // + users si ADMIN (non-bloquant : erreur sur /api/users n'interrompt pas le reste)
 // Puis setState() sur chaque store Zustand
 ```
+
+### Handshake M5 — `startSse()` est async
+
+`EventSource` ne peut pas envoyer de header `Authorization`. Avant chaque
+connexion, `sse.ts` POST `/api/events/auth` pour récupérer un token
+single-use (60s) qu'il passe en query param :
+
+```typescript
+export async function startSse() {
+  const auth = await api<{ token: string }>("/api/events/auth", { method: "POST" });
+  const url = `${getApiUrl()}/api/events/stream?token=${encodeURIComponent(auth.token)}`;
+  es = new EventSource(url);
+  // …
+}
+```
+
+**Callers** : `syncBackend.ts` et `store/backend.ts` n'attendent pas le résultat,
+mais préfixent l'appel par `void` pour marquer la promesse comme intentionnellement
+ignorée. Tout nouveau caller doit faire pareil (ou `await` si on dépend de l'open).
+Le token est aussi re-fetché à chaque retry / reconnexion zombie.
 
 ---
 

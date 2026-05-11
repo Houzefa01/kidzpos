@@ -102,7 +102,8 @@ web/
 | GET | `/api/settings` | authenticated | Paramètres shop |
 | PUT | `/api/settings` | ADMIN | Modifier paramètres |
 | POST | `/api/exchange/refresh` | authenticated | Rafraîchir taux EUR→AR |
-| GET | `/api/events/stream` | public (M5 défaut) | SSE stream |
+| POST | `/api/events/auth` | authenticated | Émet un eventToken single-use 60s (M5) |
+| GET | `/api/events/stream` | tokenized (M5) | SSE stream — `?token=…` consommé au handshake |
 | GET | `/actuator/health` | public | Health check |
 
 ---
@@ -250,6 +251,9 @@ if (!"ADMIN".equals(me.role())) {
 ### Routes publiques (actuelles)
 ```java
 .requestMatchers("/api/auth/**", "/actuator/health", "/api/events/stream").permitAll()
+// `/api/events/stream` reste permitAll côté Spring Security parce qu'EventSource
+// ne peut pas porter d'header Authorization. La protection vit DANS le controller :
+// EventTokenStore.consume(?token=...) avant ouverture du SseEmitter.
 ```
 
 ### ADMIN seulement (actuelles)
@@ -316,6 +320,112 @@ bus.publish("customer", "updated", saved);
 ```
 
 Le payload `optionalPayload` est ignoré côté client — il re-fetch via `/api/*`.
+
+### Handshake authentifié (M5)
+
+`EventSource` ne peut pas envoyer de header `Authorization`, donc l'auth se fait
+en deux temps :
+
+```java
+// EventTokenStore : UUID single-use, TTL 60s, in-memory ConcurrentHashMap
+@PostMapping("/auth")              // auth JWT requise
+public Map<String, Object> auth() { return Map.of("token", tokens.issue(), …); }
+
+@GetMapping("/stream")             // permitAll côté Security, vérifié ici
+public ResponseEntity<SseEmitter> stream(@RequestParam String token) {
+    if (!tokens.consume(token)) return ResponseEntity.status(401).build();
+    return ResponseEntity.ok(bus.subscribe());
+}
+```
+
+Le token n'est vérifié qu'au handshake — une fois la connexion SSE ouverte, elle
+n'est pas révoquée à l'expiration du token. Si on passe multi-instance backend,
+remplacer le store in-memory par un JWT signé ou Redis.
+
+---
+
+## Soft-delete — pattern `@SQLRestriction` (Product)
+
+Hibernate 6 (Spring Boot 3.3+) supporte `@SQLRestriction`, qui injecte un
+prédicat dans **toutes** les requêtes JPQL générées (`findAll`, `findById`,
+`findByStoreId`, dérivés Spring Data…) — sans toucher aux call sites.
+
+```java
+@Entity @Table(name = "products")
+@SQLRestriction("deleted_at IS NULL")
+public class Product {
+    @Column(name = "deleted_at") private Instant deletedAt;
+    // …
+}
+```
+
+### Gotcha : ne s'applique qu'à JPQL, pas aux native queries
+
+Pour les cas qui DOIVENT voir les lignes supprimées (ex : refund qui restocke
+un produit retiré du catalogue), utiliser un native query explicite :
+
+```java
+@Query(value = "SELECT * FROM products WHERE id = :id", nativeQuery = true)
+Optional<Product> findByIdIncludingDeleted(@Param("id") String id);
+```
+
+### Unique constraints + soft-delete
+
+Une `UNIQUE (store_id, sku)` classique empêche de recycler un SKU après
+suppression logique. Utiliser un **index partiel** PostgreSQL :
+
+```sql
+ALTER TABLE products DROP CONSTRAINT IF EXISTS uk_product_store_sku;
+CREATE UNIQUE INDEX uk_product_store_sku_active
+    ON products (store_id, sku) WHERE deleted_at IS NULL;
+```
+
+Et **retirer** `uniqueConstraints` de l'annotation `@Table` de l'entité (sinon
+`ddl-auto: validate` ne reconnaît pas l'index partiel comme équivalent).
+
+### Suppression dans le controller
+
+```java
+@DeleteMapping("/{id}")
+public ResponseEntity<?> delete(@PathVariable String id) {
+    var p = repo.findById(id).orElse(null);   // déjà filtré par @SQLRestriction
+    if (p == null) return ResponseEntity.notFound().build();
+    p.setDeletedAt(Instant.now());
+    repo.save(p);
+    bus.publish("product", "deleted", Map.of("id", id));
+    return ResponseEntity.noContent().build();
+}
+```
+
+---
+
+## Filtres servlet custom — pattern OncePerRequestFilter
+
+Deux filtres maison à ce jour : `JwtAuthFilter` (auth) et `LoginRateLimitFilter`
+(rate-limit M3). Tous deux suivent le même montage :
+
+```java
+@Component
+public class MyFilter extends OncePerRequestFilter {
+    @Override
+    protected void doFilterInternal(HttpServletRequest req, HttpServletResponse res,
+                                    FilterChain chain) throws ServletException, IOException {
+        // logique pré-chain
+        chain.doFilter(req, res);
+        // logique post-chain (peut lire res.getStatus())
+    }
+}
+```
+
+```java
+// SecurityConfig — ordre dans la chaîne
+.addFilterBefore(loginRateLimitFilter, JwtAuthFilter.class)
+.addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
+```
+
+Le rate-limit est volontairement in-memory (`ConcurrentHashMap<IP, Deque<Long>>`)
+— fenêtre glissante, seuls les 401 consomment le quota, IP nettoyée quand sa
+queue se vide. Pas de dépendance externe ; à reprendre si on passe multi-instance.
 
 ---
 

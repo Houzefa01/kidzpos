@@ -115,7 +115,7 @@ export default function Settings() {
                 <SelectItem value="EUR">Euro (€)</SelectItem>
               </SelectContent>
             </Select>
-            <p className="text-xs text-muted-foreground">Les prix sont stockés en € en interne et convertis à l'affichage.</p>
+            <p className="text-xs text-muted-foreground">Les prix sont stockés en Ariary. EUR n'est qu'une vue d'affichage convertie via le taux.</p>
           </div>
           <div className="space-y-1.5">
             <Label className="flex items-center gap-1"><Wifi className="h-3 w-3" /> Taux 1 € = ? Ar</Label>
@@ -165,12 +165,14 @@ export default function Settings() {
         <h2 className="mb-4 font-display text-lg font-bold">Programme de fidélité</h2>
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-1.5">
-            <Label>Points gagnés par euro dépensé</Label>
-            <Input type="number" step="0.1" min={0} value={form.pointsPerEuro} onChange={(e) => setForm({ ...form, pointsPerEuro: +e.target.value || 0 })} />
+            <Label>Points gagnés par Ariary dépensé</Label>
+            <Input type="number" step="0.0001" min={0} value={form.pointsPerAr} onChange={(e) => setForm({ ...form, pointsPerAr: +e.target.value || 0 })} />
+            <p className="text-xs text-muted-foreground">Ex : 0.0002 = 1 point pour 5 000 Ar.</p>
           </div>
           <div className="space-y-1.5">
-            <Label>Valeur d'un point (€)</Label>
-            <Input type="number" step="0.01" min={0} value={form.euroPerPoint} onChange={(e) => setForm({ ...form, euroPerPoint: +e.target.value || 0 })} />
+            <Label>Valeur d'un point (Ar)</Label>
+            <Input type="number" step="1" min={0} value={form.arPerPoint} onChange={(e) => setForm({ ...form, arPerPoint: +e.target.value || 0 })} />
+            <p className="text-xs text-muted-foreground">Ex : 100 = 1 point vaut 100 Ar de réduction.</p>
           </div>
         </div>
       </Card>

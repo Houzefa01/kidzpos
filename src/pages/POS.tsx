@@ -18,7 +18,7 @@ import { CustomerPicker } from "@/components/CustomerPicker";
 import { Plus, Minus, Trash2, Receipt as ReceiptIcon, Banknote, Printer, Star, Keyboard, ScanLine, Pause, Play, FileText } from "lucide-react";
 import { toast } from "sonner";
 import { downloadReceiptPdf } from "@/lib/pdf";
-import { useFormatMoney, parseMoneyToEur, currencySymbol } from "@/lib/money";
+import { useFormatMoney, parseMoneyToAr, currencySymbol } from "@/lib/money";
 
 export default function POS() {
   const { user } = useAuth();
@@ -119,24 +119,25 @@ export default function POS() {
   // Points utilisés
   const maxRedeemable = customer ? customer.points : 0;
   const usedPoints = Math.max(0, Math.min(maxRedeemable, redeemPoints));
-  const pointsValue = +(usedPoints * settings.euroPerPoint).toFixed(2);
+  const pointsValue = +(usedPoints * settings.arPerPoint).toFixed(2);
 
   const taxableBase = Math.max(0, subtotal - discountAmt - pointsValue);
   const tax = +(taxableBase * (settings.taxRate / 100)).toFixed(2);
   const total = +(taxableBase + tax).toFixed(2);
-  // Le caissier saisit dans la devise affichée — on convertit en EUR pour comparer
-  // au total (stocké en EUR). Évite que "50000" en AR soit interprété comme 50000 €.
-  const amountPaidEur = parseMoneyToEur(amountPaidInput, saleCurrency, rate);
-  const change = paymentMode === "CASH" && amountPaidEur > 0 ? +(amountPaidEur - total).toFixed(2) : 0;
+  // Le caissier saisit dans la devise affichée — on convertit en AR (canonique)
+  // pour comparer au total. Si saleCurrency=EUR, on multiplie par le taux ; sinon
+  // passthrough. Évite l'interprétation incorrecte de la saisie.
+  const amountPaidAr = parseMoneyToAr(amountPaidInput, saleCurrency, rate);
+  const change = paymentMode === "CASH" && amountPaidAr > 0 ? +(amountPaidAr - total).toFixed(2) : 0;
 
   const checkout = () => {
     if (!user) { toast.error("Session expirée"); return; }
     if (cart.length === 0) return;
     if (paymentMode === "CASH") {
-      if (amountPaidEur <= 0) { toast.error("Saisissez le montant reçu"); return; }
-      if (amountPaidEur < total) { toast.error("Montant reçu insuffisant"); return; }
+      if (amountPaidAr <= 0) { toast.error("Saisissez le montant reçu"); return; }
+      if (amountPaidAr < total) { toast.error("Montant reçu insuffisant"); return; }
     }
-    const pointsEarned = customer ? Math.floor(total * settings.pointsPerEuro) : 0;
+    const pointsEarned = customer ? Math.floor(total * settings.pointsPerAr) : 0;
     const sale = addSale({
       storeId,
       userId: user.id,
@@ -153,7 +154,7 @@ export default function POS() {
       pointsRedeemed: usedPoints,
       paymentMode,
       // Non-CASH = paiement exact (carte/mobile money/mixte) → amountPaid = total.
-      amountPaid: paymentMode === "CASH" ? amountPaidEur : total,
+      amountPaid: paymentMode === "CASH" ? amountPaidAr : total,
       change,
       currency: saleCurrency,
     });
@@ -477,7 +478,7 @@ export default function POS() {
               <div className="space-y-1 py-2 text-xs">
                 <div className="flex justify-between"><span>Sous-total</span><span>{fmt(receipt.subtotal, receipt.currency)}</span></div>
                 {receipt.discount > 0 && <div className="flex justify-between"><span>Remise</span><span>-{fmt(receipt.discount, receipt.currency)}</span></div>}
-                {receipt.pointsRedeemed > 0 && <div className="flex justify-between text-warning"><span>Points utilisés ({receipt.pointsRedeemed})</span><span>-{fmt(receipt.pointsRedeemed * settings.euroPerPoint, receipt.currency)}</span></div>}
+                {receipt.pointsRedeemed > 0 && <div className="flex justify-between text-warning"><span>Points utilisés ({receipt.pointsRedeemed})</span><span>-{fmt(receipt.pointsRedeemed * settings.arPerPoint, receipt.currency)}</span></div>}
                 <div className="flex justify-between"><span>TVA ({receipt.taxRate}%)</span><span>{fmt(receipt.tax, receipt.currency)}</span></div>
                 <div className="flex justify-between border-t border-dashed border-border pt-1 font-bold text-base text-primary"><span>TOTAL</span><span>{fmt(receipt.total, receipt.currency)}</span></div>
                 <div className="flex justify-between"><span>Paiement</span><span>{paymentLabel(receipt.paymentMode)}</span></div>
@@ -543,8 +544,8 @@ function QuickProductDialog({
             <Input value={form.sku} onChange={(e) => setForm({ ...form, sku: e.target.value })} placeholder="auto" />
           </div>
           <div className="space-y-1.5">
-            <Label>Prix (€ HT) *</Label>
-            <Input type="number" step="0.01" value={form.price || ""} onChange={(e) => setForm({ ...form, price: +e.target.value || 0 })} />
+            <Label>Prix (Ar HT) *</Label>
+            <Input type="number" step="1" min={0} value={form.price || ""} onChange={(e) => setForm({ ...form, price: +e.target.value || 0 })} />
           </div>
           <div className="space-y-1.5">
             <Label>Stock</Label>

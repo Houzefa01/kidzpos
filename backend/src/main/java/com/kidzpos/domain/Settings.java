@@ -10,9 +10,12 @@ public class Settings {
     private Long id;          // toujours 1
     @Column(nullable = false) private double taxRate;
     @Column(nullable = false) private double maxDiscountPercent;
-    @Column(nullable = false) private double pointsPerEuro;
-    @Column(nullable = false) private double euroPerPoint;
+    /** Devise canonique = Ariary. Points gagnés = (montant en Ar) × pointsPerAr.
+     *  Conversion en EUR uniquement à l'affichage côté frontend. */
+    @Column(name = "points_per_ar", nullable = false) private double pointsPerAr;
+    /** Valeur en Ariary d'un point fidélité. */
+    @Column(name = "ar_per_point", nullable = false) private double arPerPoint;
     @Column(nullable = false) private String shopName;
-    /** Devise par défaut affichée : "AR" (Ariary) ou "EUR" (Euro). */
+    /** Devise par défaut affichée : "AR" (Ariary) ou "EUR" (Euro). Stockage = AR. */
     @Column(nullable = false) private String currency;
 }

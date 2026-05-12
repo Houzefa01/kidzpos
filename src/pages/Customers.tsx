@@ -12,9 +12,11 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Plus, Search, Star, Trash2, Pencil, Gift } from "lucide-react";
 import { toast } from "sonner";
+import { useFormatMoney } from "@/lib/money";
 
 export default function Customers() {
   const { user } = useAuth();
+  const fmt = useFormatMoney();
   const { customers, addCustomer, updateCustomer, deleteCustomer } = useCustomers();
   const { sales } = useData();
   const isAdmin = user?.role === "ADMIN";
@@ -121,7 +123,7 @@ export default function Customers() {
                 <TableCell className="text-xs">{c.phone || "—"}</TableCell>
                 <TableCell className="text-xs">{c.email || "—"}</TableCell>
                 <TableCell className="text-right">{c.visits}</TableCell>
-                <TableCell className="text-right font-mono">{c.totalSpent.toFixed(2)} €</TableCell>
+                <TableCell className="text-right font-mono">{fmt(c.totalSpent)}</TableCell>
                 <TableCell className="text-right">
                   <Badge variant="outline" className="border-warning/50 text-warning"><Star className="mr-1 h-3 w-3" />{c.points}</Badge>
                 </TableCell>
@@ -155,7 +157,7 @@ export default function Customers() {
             <div className="space-y-3 text-sm">
               <div className="grid grid-cols-3 gap-2">
                 <Card className="p-3 text-center"><p className="text-xs text-muted-foreground">Visites</p><p className="font-display text-2xl font-bold">{detail.visits}</p></Card>
-                <Card className="p-3 text-center"><p className="text-xs text-muted-foreground">Dépensé</p><p className="font-display text-2xl font-bold text-primary">{detail.totalSpent.toFixed(0)} €</p></Card>
+                <Card className="p-3 text-center"><p className="text-xs text-muted-foreground">Dépensé</p><p className="font-display text-2xl font-bold text-primary">{fmt(detail.totalSpent)}</p></Card>
                 <Card className="p-3 text-center"><p className="text-xs text-muted-foreground">Points</p><p className="font-display text-2xl font-bold text-warning">{detail.points}</p></Card>
               </div>
               {isAdmin && (
@@ -173,7 +175,7 @@ export default function Customers() {
                   {detailSales.map((s) => (
                     <div key={s.id} className="flex justify-between rounded border border-border bg-secondary/40 px-3 py-2 text-xs">
                       <span>#{String(s.seq).padStart(6, "0")} · {new Date(s.date).toLocaleDateString("fr-FR")}</span>
-                      <span className={`font-mono ${s.total < 0 ? "text-destructive" : ""}`}>{s.total.toFixed(2)} €</span>
+                      <span className={`font-mono ${s.total < 0 ? "text-destructive" : ""}`}>{fmt(s.total, s.currency)}</span>
                     </div>
                   ))}
                   {detailSales.length === 0 && <p className="text-center text-xs text-muted-foreground">Aucun achat.</p>}

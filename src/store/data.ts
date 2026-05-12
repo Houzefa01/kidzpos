@@ -391,7 +391,7 @@ export const useData = create<DataState>()(
     }),
     {
       name: "kidzpos-data",
-      version: 4,
+      version: 5,
       migrate: (persisted: unknown, version) => {
         if (!persisted || typeof persisted !== "object") return persisted;
         const state = persisted as Record<string, unknown>;
@@ -423,6 +423,17 @@ export const useData = create<DataState>()(
         if (version < 4) {
           // Suppression des données seed de l'ère SQLite. Postgres est désormais
           // la source de vérité, syncBackend repeuplera au prochain démarrage.
+          state.stores = [];
+          state.products = [];
+          state.sales = [];
+          state.moves = [];
+          state.parked = [];
+          state.saleSeq = {};
+        }
+        if (version < 5) {
+          // Bascule devise canonique EUR → AR (V5 backend). Toutes les valeurs
+          // monétaires persistées étaient en EUR — on wipe pour éviter que des
+          // produits "10 €" soient interprétés comme "10 Ar" au réaffichage.
           state.stores = [];
           state.products = [];
           state.sales = [];

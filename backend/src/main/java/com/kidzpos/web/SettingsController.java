@@ -23,8 +23,8 @@ public class SettingsController {
         var s = repo.findById(1L).orElseThrow();
         s.setTaxRate(r.taxRate());
         s.setMaxDiscountPercent(r.maxDiscountPercent());
-        s.setPointsPerEuro(r.pointsPerEuro());
-        s.setEuroPerPoint(r.euroPerPoint());
+        s.setPointsPerAr(r.pointsPerAr());
+        s.setArPerPoint(r.arPerPoint());
         s.setShopName(r.shopName());
         if (r.currency() != null && !r.currency().isBlank()) s.setCurrency(r.currency());
         var saved = repo.save(s);

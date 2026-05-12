@@ -73,8 +73,8 @@ export const UserSchema = z.object({
 export const SettingsSchema = z.object({
   taxRate: z.number(),
   maxDiscountPercent: z.number(),
-  pointsPerEuro: z.number(),
-  euroPerPoint: z.number(),
+  pointsPerAr: z.number(),
+  arPerPoint: z.number(),
   shopName: z.string(),
   currency: z.enum(["AR", "EUR"]).default("AR"),
 });

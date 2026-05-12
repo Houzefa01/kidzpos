@@ -42,7 +42,7 @@ export function downloadReceiptPdf(sale: Sale, store: Store | undefined, setting
   sep();
   line("Sous-total", m(sale.subtotal));
   if (sale.discount > 0) line("Remise", `-${m(sale.discount)}`);
-  if (sale.pointsRedeemed > 0) line(`Points (-${sale.pointsRedeemed})`, `-${m(sale.pointsRedeemed * settings.euroPerPoint)}`);
+  if (sale.pointsRedeemed > 0) line(`Points (-${sale.pointsRedeemed})`, `-${m(sale.pointsRedeemed * settings.arPerPoint)}`);
   line(`TVA (${sale.taxRate}%)`, m(sale.tax));
   line("TOTAL", m(sale.total), 10, true);
   line("Paiement", paymentLabel(sale.paymentMode));

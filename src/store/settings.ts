@@ -7,10 +7,12 @@ export type Currency = "AR" | "EUR";
 export interface Settings {
   taxRate: number; // %
   maxDiscountPercent: number;
-  pointsPerEuro: number;
-  euroPerPoint: number;
+  /** Points gagnés par Ariary dépensé. Ex: 0.0002 → 1 point par 5000 Ar. */
+  pointsPerAr: number;
+  /** Valeur en Ariary d'un point fidélité. Ex: 100 → 1 point = 100 Ar de réduction. */
+  arPerPoint: number;
   shopName: string;
-  currency: Currency; // devise d'affichage par défaut Ar
+  currency: Currency; // devise d'AFFICHAGE par défaut. Stockage = AR.
 }
 
 interface SettingsState {
@@ -22,8 +24,9 @@ interface SettingsState {
 const DEFAULTS: Settings = {
   taxRate: 20,
   maxDiscountPercent: 10,
-  pointsPerEuro: 1,
-  euroPerPoint: 0.05,
+  // 5000 Ar dépensés → 1 point ; 1 point = 100 Ar (∼2% de retour).
+  pointsPerAr: 0.0002,
+  arPerPoint: 100,
   shopName: "KidzPOS",
   currency: "AR",
 };
@@ -44,11 +47,19 @@ export const useSettings = create<SettingsState>()(
     }),
     {
       name: "kidzpos-settings",
-      version: 2,
-      migrate: (persisted: unknown) => {
-        const state = persisted as Record<string, Record<string, string>>;
+      version: 3,
+      migrate: (persisted: unknown, version) => {
+        const state = persisted as Record<string, Record<string, unknown>>;
         if (state?.settings && !state.settings.currency) {
           state.settings.currency = "AR";
+        }
+        if (version < 3 && state?.settings) {
+          // Migration EUR→AR : on n'essaie pas de convertir les anciennes valeurs
+          // (qui étaient en EUR), on remet les defaults Ariary.
+          state.settings.pointsPerAr = 0.0002;
+          state.settings.arPerPoint = 100;
+          delete state.settings.pointsPerEuro;
+          delete state.settings.euroPerPoint;
         }
         return state;
       },

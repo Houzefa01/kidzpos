@@ -202,7 +202,7 @@ export default function Sales() {
               {viewSale.pointsRedeemed > 0 && (
                 <div className="flex justify-between text-xs text-warning">
                   <span>Points utilisés ({viewSale.pointsRedeemed})</span>
-                  <span>-{fmt(viewSale.pointsRedeemed * settings.euroPerPoint, viewSale.currency)}</span>
+                  <span>-{fmt(viewSale.pointsRedeemed * settings.arPerPoint, viewSale.currency)}</span>
                 </div>
               )}
               <div className="flex justify-between text-xs"><span>TVA ({viewSale.taxRate}%)</span><span>{fmt(viewSale.tax, viewSale.currency)}</span></div>

@@ -108,11 +108,11 @@ public class SaleController {
             }
         }
 
-        double pointsValue = req.pointsRedeemed() * s.getEuroPerPoint();
+        double pointsValue = req.pointsRedeemed() * s.getArPerPoint();
         double afterDiscount = Math.max(0, subtotal - discount - pointsValue);
         double tax = afterDiscount * s.getTaxRate() / 100.0;
         double total = afterDiscount + tax;
-        int pointsEarned = (int) Math.floor(total * s.getPointsPerEuro());
+        int pointsEarned = (int) Math.floor(total * s.getPointsPerAr());
 
         long seq = sales.findMaxSeqByStoreId(req.storeId()).orElse(0L) + 1;
         // I8 : si le client a fourni un clientSaleId, on l'utilise comme ID de vente

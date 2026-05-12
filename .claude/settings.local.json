@@ -35,7 +35,8 @@
       "Bash(./start-server.sh status *)",
       "Bash(pg_isready -h localhost -p 5432)",
       "Bash(./start-server.sh *)",
-      "Bash(mvn -q -DskipTests package)"
+      "Bash(mvn -q -DskipTests package)",
+      "Bash(PGPASSWORD=kidzpos psql -h localhost -U kidzpos -d kidzpos -c \"SELECT conname, pg_get_constraintdef\\(oid\\) FROM pg_constraint WHERE conrelid='sales'::regclass AND contype='c';\")"
     ]
   }
 }

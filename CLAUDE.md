@@ -101,10 +101,13 @@ mvn package                    # build + tests
 java -jar target/kidzpos-backend-1.0.0.jar   # démarrer
 
 # Serveur LAN complet
-./start-server.sh              # build + backend :8080 + frontend statique :3000
+./start-server.sh              # démarre avec le JAR + dist/ EXISTANTS (ne rebuild pas)
 ./start-server.sh stop
 ./start-server.sh status
-./start-server.sh rebuild      # force rebuild JAR + dist/
+./start-server.sh rebuild      # force rebuild JAR + dist/ — OBLIGATOIRE après toute
+                               # modif backend (code Java, migration Flyway, application.yml)
+                               # sinon le serveur tourne avec l'ancien binaire et p.ex. une
+                               # migration V{n+1} fraîchement écrite n'est PAS appliquée.
 
 # PostgreSQL (requis avant démarrage backend)
 # Voir backend/README.md § 2.1
@@ -173,9 +176,10 @@ main.tsx : createRoot().render(<App />)
 - Pages exportées en `export default function NomPage()`
 - Composants UI : shadcn importés depuis `@/components/ui/`
 - `toast.success()` / `toast.error()` via `sonner` (pas le hook shadcn toast)
-- Money : **toujours en EUR** en interne. Pour le rendu, deux modes :
+- Money : **stockage en Ariary** (depuis V5). EUR n'existe que comme vue d'affichage convertie via `useExchange.rate`. Pour le rendu, deux modes :
   - `fmt(amount)` → utilise la devise globale courante (`settings.currency`)
   - `fmt(amount, sale.currency)` → utilise la devise **figée au checkout** de cette vente. Obligatoire sur tous les reçus historiques (POS receipt overlay, Sales detail) sinon un changement de devise globale réécrit visuellement les ventes passées.
+  - Toute saisie utilisateur en EUR doit passer par `parseMoneyToAr(input, currency, rate)` avant d'être stockée/envoyée au backend.
 - IDs générés client-side : pattern `p${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
 - `useMemo` systématique pour les listes filtrées
 - `useHotkeys` pour les raccourcis POS (F2, F9, Escape)
@@ -207,6 +211,8 @@ main.tsx : createRoot().render(<App />)
 - `Settings` : singleton en base avec `id=1L` fixe — `repo.findById(1L).orElseThrow()` partout
 - **DEV uniquement** : `auth.ts` pré-charge 3 seed users et leurs passwords via `import.meta.env.DEV` — absent en production
 - **Soft-delete (Product)** : `@SQLRestriction("deleted_at IS NULL")` filtre toutes les requêtes JPQL. `DELETE /api/products/{id}` pose `deletedAt = now()` au lieu de `repo.deleteById`. Une `UNIQUE (store_id, sku)` partielle (`WHERE deleted_at IS NULL`) autorise le recyclage du SKU après suppression. **Gotcha** : `@SQLRestriction` ne s'applique qu'à JPQL — pour les call sites qui DOIVENT voir les supprimés (refund qui restocke un produit retiré), utiliser `ProductRepository.findByIdIncludingDeleted` (native query).
+- **Résidus `ddl-auto: create`** : la base a été initialisée jadis avec `ddl-auto: create`, qui génère des contraintes `CHECK` listant les valeurs des `@Enumerated(EnumType.STRING)`. Désormais en `validate`, ces CHECK ne sont plus rafraîchies. Ajouter une valeur à un enum → SQLState 23514 sur INSERT. **Recette** : migration qui `DROP CONSTRAINT IF EXISTS` puis `ADD CONSTRAINT` avec la liste à jour (cf V6 pour `sales_payment_mode_check`).
+- **Devise canonique = Ariary** : tous les montants stockés (DB, Java, state Zustand) sont en AR. EUR est uniquement une vue d'affichage frontend, convertie via `useExchange.rate`. Saisies utilisateur en EUR passent par `parseMoneyToAr()` avant tout stockage.
 
 ---
 

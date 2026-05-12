@@ -298,11 +298,36 @@ CREATE INDEX IF NOT EXISTS idx_resources_status ON resources(status);
 ## PostgreSQL — conventions
 
 - IDs : `VARCHAR(64)` — générés côté client (pattern `p${Date.now()}-${random}`)
-- Montants : `DOUBLE PRECISION` (correspondance Java `double`, TS `number`)
+- Montants : `DOUBLE PRECISION` — **valeurs en Ariary** (depuis V5). EUR n'existe que comme vue d'affichage frontend, jamais en base.
 - Dates : `TIMESTAMP` — Java `Instant`, sérialisé ISO-8601 en JSON
 - Enums : `VARCHAR(32)` avec `@Enumerated(EnumType.STRING)`
 - Contraintes uniques nommées : `CONSTRAINT uk_nom UNIQUE (col1, col2)`
 - Indexes nommés : `CREATE INDEX IF NOT EXISTS idx_table_col ON table(col)`
+
+### Gotcha : enum + CHECK constraint résiduelle
+
+Quand Hibernate crée une table avec `ddl-auto: create` (ou `update` ajoutant
+la colonne) et une propriété `@Enumerated(EnumType.STRING)`, il génère
+**automatiquement** un `CHECK (col IN ('VAL1', 'VAL2', …))` listant les
+valeurs de l'enum à ce moment-là.
+
+Avec `ddl-auto: validate` (notre prod actuelle), Hibernate **ne rafraîchit
+plus** ce CHECK. Ajouter une valeur à l'enum côté Java → SQLState 23514
+(`new row violates check constraint`) au prochain INSERT avec la nouvelle
+valeur. Le retry-loop de `SaleController.runWithSeqRetry` masque l'erreur
+en transformant en 409 "Conflit numérotation" — piège diagnostique.
+
+**Recette** : pour toute extension d'enum déjà persisté, créer une migration
+qui drop + recrée la CHECK avec les valeurs courantes.
+
+```sql
+-- V6__payment_mode_check_mobile_money.sql (ex réel)
+ALTER TABLE sales DROP CONSTRAINT IF EXISTS sales_payment_mode_check;
+ALTER TABLE sales ADD CONSTRAINT sales_payment_mode_check
+    CHECK (payment_mode IN ('CASH', 'CARD', 'MIXED', 'MOBILE_MONEY'));
+```
+
+Pour identifier le nom : `SELECT conname FROM pg_constraint WHERE conrelid='ta_table'::regclass AND contype='c';`
 
 ---
 
@@ -558,11 +583,26 @@ Settings s = settingsRepo.findById(1L).orElseThrow();
 ## DataInitializer — seed au 1er boot
 
 ```java
-// Déclenché seulement si stores.count() == 0 / users.count() == 0 / settings.count() == 0
-// Chaque ressource est seedée indépendamment (on peut avoir des stores sans users si besoin)
-// Mots de passe lus depuis env vars KIDZPOS_*_PASSWORD
-// Si absent → UUID généré + affiché sur STDOUT (pas dans les logs — M2)
+// Déclenché seulement si stores.count() == 0 / users.count() == 0 /
+// settings.count() == 0 / products.count() == 0.
+// Chaque ressource est seedée indépendamment.
+// Mots de passe lus depuis env vars KIDZPOS_*_PASSWORD ; sinon UUID
+// affiché sur STDOUT (pas dans les logs — M2).
 ```
+
+Ressources actuellement seedées :
+
+| Resource | Quantité | Notes |
+|---|---|---|
+| stores | 2 (s1, s2) | Magasin A / B |
+| users | 3 (admin, sarah, karim) | mots de passe via env vars |
+| settings | 1 (id=1) | currency='AR', pointsPerAr=0.0002, arPerPoint=100 |
+| products | 12 × 2 stores = 24 | prix Ariary réalistes (8 000 à 120 000 Ar) |
+
+**Important** : depuis le passage à Postgres source-of-truth, DataInitializer
+est la **seule** source de seed. L'ancien `buildSeedProducts` côté frontend
+a été supprimé. Toute nouvelle entité avec des seeds attendus doit y être
+ajoutée — sinon le frontend affiche une liste vide après chaque reset DB.
 
 ---
 

@@ -353,18 +353,32 @@ connexion, `sse.ts` POST `/api/events/auth` pour récupérer un token
 single-use (60s) qu'il passe en query param :
 
 ```typescript
+let starting = false;
+
 export async function startSse() {
-  const auth = await api<{ token: string }>("/api/events/auth", { method: "POST" });
-  const url = `${getApiUrl()}/api/events/stream?token=${encodeURIComponent(auth.token)}`;
-  es = new EventSource(url);
-  // …
+  if (starting) return;                              // ← guard in-flight
+  if (es && (es.readyState === OPEN || CONNECTING)) return;
+  starting = true;
+  try {
+    const auth = await api<{ token: string }>("/api/events/auth", { method: "POST" });
+    es = new EventSource(`${getApiUrl()}/api/events/stream?token=${encodeURIComponent(auth.token)}`);
+    // …
+  } finally {
+    starting = false;
+  }
 }
 ```
 
-**Callers** : `syncBackend.ts` et `store/backend.ts` n'attendent pas le résultat,
-mais préfixent l'appel par `void` pour marquer la promesse comme intentionnellement
-ignorée. Tout nouveau caller doit faire pareil (ou `await` si on dépend de l'open).
-Le token est aussi re-fetché à chaque retry / reconnexion zombie.
+**Pourquoi le flag `starting`** : la phase `await api()` crée une fenêtre où
+`es` est encore `null`. Sans flag, deux appels concurrents (au boot :
+`backend.pulse()` ET `syncBackend.hydrate()`) passent tous deux le guard et
+ouvrent chacun leur `EventSource`. Pattern réutilisable pour toute init
+async avec un guard "déjà actif".
+
+**Callers** : `syncBackend.ts:67` appelle `void startSse()` à la fin d'un
+hydrate réussi. `store/backend.ts` ne le double pas (anciennement un
+`.finally(startSse)` redondant). Tout nouveau caller : `void startSse()`
+(la promesse n'a pas de résultat utile à attendre).
 
 ---
 

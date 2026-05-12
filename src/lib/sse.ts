@@ -9,6 +9,10 @@ let retryDelay = 2000;
 let hydrateTimer: number | null = null;
 let lastHeartbeatAt = Date.now();
 let heartbeatMonitor: number | null = null;
+// In-flight guard : la phase async (POST /api/events/auth) crée une fenêtre
+// pendant laquelle `es` est encore null. Sans flag, deux appels concurrents
+// (syncBackend + backend.pulse au boot) ouvrent chacun leur connexion.
+let starting = false;
 
 function scheduleHydrate() {
   if (hydrateTimer) return;
@@ -43,9 +47,11 @@ function startHeartbeatMonitor() {
 }
 
 export async function startSse() {
+  if (starting) return;
   if (es && (es.readyState === EventSource.OPEN || es.readyState === EventSource.CONNECTING)) return;
-  stopSse();
+  starting = true;
   try {
+    stopSse();
     // M5 : EventSource ne peut pas envoyer Authorization. On demande un token
     // single-use (60s) via POST /api/events/auth, qu'on passe en query param.
     const auth = await api<{ token: string }>("/api/events/auth", { method: "POST" });
@@ -70,6 +76,8 @@ export async function startSse() {
     es = null;
     retryDelay = Math.min(retryDelay * 1.5, 30_000);
     retryTimer = window.setTimeout(() => { void startSse(); }, retryDelay);
+  } finally {
+    starting = false;
   }
 }
 

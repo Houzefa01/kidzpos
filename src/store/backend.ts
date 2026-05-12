@@ -25,11 +25,13 @@ export const useBackend = create<BackendState>((set, get) => ({
     if (ok !== wasReachable) {
       set({ lanReachable: ok });
       if (ok) {
-        // Hydrate d'abord pour avoir les données à jour, PUIS démarrer SSE
+        // hydrateFromBackend déclenche startSse() en interne au succès.
+        // Pas de .finally(startSse) ici : (1) ça dédoublait l'appel pendant la
+        // fenêtre async POST /api/events/auth (deux EventSource ouverts au boot),
+        // (2) en cas d'échec hydrate, ouvrir SSE est inutile (backend unreachable).
         import("@/lib/syncBackend")
           .then(({ hydrateFromBackend }) => hydrateFromBackend())
-          .catch(() => {})
-          .finally(() => { void startSse(); });
+          .catch(() => {});
       } else {
         stopSse();
       }

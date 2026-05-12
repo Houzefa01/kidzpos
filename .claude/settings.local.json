@@ -31,7 +31,11 @@
       "Bash(xargs -I{} echo \"{}\")",
       "Bash(git add *)",
       "Bash(git commit *)",
-      "Bash(mvn -q package -DskipTests)"
+      "Bash(mvn -q package -DskipTests)",
+      "Bash(./start-server.sh status *)",
+      "Bash(pg_isready -h localhost -p 5432)",
+      "Bash(./start-server.sh *)",
+      "Bash(mvn -q -DskipTests package)"
     ]
   }
 }

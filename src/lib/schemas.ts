@@ -43,7 +43,7 @@ export const SaleSchema = z.object({
   customerName: z.string().nullish(),
   pointsEarned: z.number(),
   pointsRedeemed: z.number(),
-  paymentMode: z.enum(["CASH", "CARD", "MIXED"]),
+  paymentMode: z.enum(["CASH", "CARD", "MIXED", "MOBILE_MONEY"]),
   amountPaid: z.number().nullish(),
   change: z.number().nullish(),
   refundedFrom: z.string().nullish(),

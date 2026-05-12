@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useAuth } from "@/store/auth";
-import { useData } from "@/store/data";
+import { useData, paymentLabel } from "@/store/data";
 import { useSettings } from "@/store/settings";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -209,7 +209,7 @@ export default function Sales() {
               <div className="flex justify-between text-base font-bold"><span>TOTAL</span><span>{fmt(viewSale.total, viewSale.currency)}</span></div>
               <div className="flex justify-between text-xs">
                 <span>Paiement</span>
-                <span>{viewSale.paymentMode === "CASH" ? "Espèces" : viewSale.paymentMode === "CARD" ? "Carte" : "Mixte"}</span>
+                <span>{paymentLabel(viewSale.paymentMode)}</span>
               </div>
               {viewSale.paymentMode === "CASH" && viewSale.change != null && viewSale.change > 0 && (
                 <div className="flex justify-between text-xs"><span>Rendu</span><span>{fmt(viewSale.change, viewSale.currency)}</span></div>

@@ -29,8 +29,18 @@ export interface SaleItem {
   price: number;
 }
 
-export type PaymentMode = "CASH" | "CARD" | "MIXED";
+export type PaymentMode = "CASH" | "CARD" | "MIXED" | "MOBILE_MONEY";
 export type SaleCurrency = "AR" | "EUR";
+
+/** Libellé FR uniformisé pour l'affichage. Source unique pour POS, Sales, PDF. */
+export function paymentLabel(mode: PaymentMode): string {
+  switch (mode) {
+    case "CASH": return "Espèces";
+    case "CARD": return "Carte";
+    case "MIXED": return "Mixte";
+    case "MOBILE_MONEY": return "Mobile Money";
+  }
+}
 
 export interface Sale {
   id: string;

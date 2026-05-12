@@ -1,8 +1,18 @@
 import jsPDF from "jspdf";
 import type { Sale, Store } from "@/store/data";
+import { paymentLabel } from "@/store/data";
 import type { Settings } from "@/store/settings";
+import { formatMoneyAs } from "@/lib/money";
+import { useExchange } from "@/store/exchange";
+import { useSettings } from "@/store/settings";
 
 export function downloadReceiptPdf(sale: Sale, store: Store | undefined, settings: Settings) {
+  // Reçu individuel : on respecte la devise FIGÉE de la vente (sale.currency).
+  // Pas la devise globale courante — un client doit voir son ticket dans la
+  // devise dans laquelle il a payé.
+  const rate = useExchange.getState().rate;
+  const m = (eur: number) => formatMoneyAs(eur, sale.currency, rate);
+
   // Format ticket 80mm de large (~ thermal)
   const doc = new jsPDF({ unit: "mm", format: [80, 200] });
   let y = 8;
@@ -27,17 +37,20 @@ export function downloadReceiptPdf(sale: Sale, store: Store | undefined, setting
   if (sale.customerName) center(`Client : ${sale.customerName}`, 7);
   sep();
   for (const it of sale.items) {
-    line(`${it.quantity}x ${it.name.slice(0, 28)}`, `${(it.price * it.quantity).toFixed(2)} €`);
+    line(`${it.quantity}x ${it.name.slice(0, 28)}`, m(it.price * it.quantity));
   }
   sep();
-  line("Sous-total", `${sale.subtotal.toFixed(2)} €`);
-  if (sale.discount > 0) line("Remise", `-${sale.discount.toFixed(2)} €`);
-  if (sale.pointsRedeemed > 0) line(`Points (-${sale.pointsRedeemed})`, `-${(sale.pointsRedeemed * settings.euroPerPoint).toFixed(2)} €`);
-  line(`TVA (${sale.taxRate}%)`, `${sale.tax.toFixed(2)} €`);
-  line("TOTAL", `${sale.total.toFixed(2)} €`, 10, true);
-  line("Paiement", sale.paymentMode === "CASH" ? "Espèces" : sale.paymentMode === "CARD" ? "Carte" : "Mixte");
+  line("Sous-total", m(sale.subtotal));
+  if (sale.discount > 0) line("Remise", `-${m(sale.discount)}`);
+  if (sale.pointsRedeemed > 0) line(`Points (-${sale.pointsRedeemed})`, `-${m(sale.pointsRedeemed * settings.euroPerPoint)}`);
+  line(`TVA (${sale.taxRate}%)`, m(sale.tax));
+  line("TOTAL", m(sale.total), 10, true);
+  line("Paiement", paymentLabel(sale.paymentMode));
+  if (sale.paymentMode === "CASH" && sale.amountPaid != null) {
+    line("Reçu", m(sale.amountPaid));
+  }
   if (sale.paymentMode === "CASH" && sale.change != null && sale.change > 0) {
-    line("Rendu", `${sale.change.toFixed(2)} €`);
+    line("Rendu", m(sale.change));
   }
   if (sale.pointsEarned > 0) line("Points gagnés", `+${sale.pointsEarned}`);
   sep();
@@ -52,6 +65,12 @@ export function downloadSalesReportPdf(
   shopName: string,
   filterLabel: string,
 ) {
+  // Rapport agrégé : on utilise la devise GLOBALE courante (settings.currency),
+  // pas celle de chaque vente — un mélange n'aurait pas de sens dans des totaux.
+  const rate = useExchange.getState().rate;
+  const currency = useSettings.getState().settings.currency;
+  const m = (eur: number) => formatMoneyAs(eur, currency, rate);
+
   const doc = new jsPDF();
   doc.setFont("helvetica", "bold").setFontSize(16);
   doc.text(`${shopName} — Rapport des ventes`, 14, 18);
@@ -63,8 +82,8 @@ export function downloadSalesReportPdf(
   const total = sales.reduce((a, s) => a + s.total, 0);
   const tax = sales.reduce((a, s) => a + s.tax, 0);
   doc.setFont("helvetica", "bold").setFontSize(12);
-  doc.text(`Total : ${total.toFixed(2)} €`, 14, 40);
-  doc.text(`Dont TVA : ${tax.toFixed(2)} €`, 14, 47);
+  doc.text(`Total : ${m(total)}`, 14, 40);
+  doc.text(`Dont TVA : ${m(tax)}`, 14, 47);
   doc.text(`Nombre de tickets : ${sales.length}`, 14, 54);
 
   // Table headers
@@ -88,7 +107,7 @@ export function downloadSalesReportPdf(
     doc.text((stores.find((x) => x.id === s.storeId)?.name ?? "").slice(0, 18), 70, y);
     doc.text(s.userName.slice(0, 14), 110, y);
     doc.text(String(s.items.reduce((a, i) => a + i.quantity, 0)), 145, y);
-    doc.text(`${s.total.toFixed(2)} €`, 195, y, { align: "right" });
+    doc.text(m(s.total), 195, y, { align: "right" });
     y += 5;
   }
 

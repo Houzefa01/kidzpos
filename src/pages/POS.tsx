@@ -2,8 +2,9 @@ import { useMemo, useRef, useState } from "react";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { useHotkeys } from "@/hooks/useHotkeys";
 import { useAuth } from "@/store/auth";
-import { useData, Product, SaleItem, Sale, PaymentMode } from "@/store/data";
+import { useData, Product, SaleItem, Sale, PaymentMode, paymentLabel } from "@/store/data";
 import { useSettings } from "@/store/settings";
+import { useExchange } from "@/store/exchange";
 import { useCustomers, Customer } from "@/store/customers";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -17,13 +18,14 @@ import { CustomerPicker } from "@/components/CustomerPicker";
 import { Plus, Minus, Trash2, Receipt as ReceiptIcon, Banknote, Printer, Star, Keyboard, ScanLine, Pause, Play, FileText } from "lucide-react";
 import { toast } from "sonner";
 import { downloadReceiptPdf } from "@/lib/pdf";
-import { useFormatMoney } from "@/lib/money";
+import { useFormatMoney, parseMoneyToEur, currencySymbol } from "@/lib/money";
 
 export default function POS() {
   const { user } = useAuth();
   const fmt = useFormatMoney();
   const { products, stores, addSale, addProduct, parked, parkCart, unparkCart } = useData();
   const { settings } = useSettings();
+  const rate = useExchange((s) => s.rate);
   const { applyPurchase } = useCustomers();
   const isAdmin = user?.role === "ADMIN";
   const [activeStore, setActiveStore] = useState<string>(user?.storeId ?? "s1");
@@ -37,7 +39,9 @@ export default function POS() {
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [redeemPoints, setRedeemPoints] = useState(0);
   const [paymentMode, setPaymentMode] = useState<PaymentMode>("CASH");
-  const [amountPaid, setAmountPaid] = useState<number>(0);
+  // Montant saisi par le caissier, dans la devise affichée (`saleCurrency`).
+  // Converti en EUR via parseMoneyToEur avant tout calcul/stockage.
+  const [amountPaidInput, setAmountPaidInput] = useState<number>(0);
   // Devise affichée au client pour CETTE vente. Default = devise globale.
   const [saleCurrency, setSaleCurrency] = useState<"AR" | "EUR">(settings.currency);
   const [quickOpen, setQuickOpen] = useState(false);
@@ -120,14 +124,17 @@ export default function POS() {
   const taxableBase = Math.max(0, subtotal - discountAmt - pointsValue);
   const tax = +(taxableBase * (settings.taxRate / 100)).toFixed(2);
   const total = +(taxableBase + tax).toFixed(2);
-  const change = paymentMode === "CASH" && amountPaid > 0 ? +(amountPaid - total).toFixed(2) : 0;
+  // Le caissier saisit dans la devise affichée — on convertit en EUR pour comparer
+  // au total (stocké en EUR). Évite que "50000" en AR soit interprété comme 50000 €.
+  const amountPaidEur = parseMoneyToEur(amountPaidInput, saleCurrency, rate);
+  const change = paymentMode === "CASH" && amountPaidEur > 0 ? +(amountPaidEur - total).toFixed(2) : 0;
 
   const checkout = () => {
     if (!user) { toast.error("Session expirée"); return; }
     if (cart.length === 0) return;
     if (paymentMode === "CASH") {
-      if (amountPaid <= 0) { toast.error("Saisissez le montant reçu"); return; }
-      if (amountPaid < total) { toast.error("Montant reçu insuffisant"); return; }
+      if (amountPaidEur <= 0) { toast.error("Saisissez le montant reçu"); return; }
+      if (amountPaidEur < total) { toast.error("Montant reçu insuffisant"); return; }
     }
     const pointsEarned = customer ? Math.floor(total * settings.pointsPerEuro) : 0;
     const sale = addSale({
@@ -145,7 +152,8 @@ export default function POS() {
       pointsEarned,
       pointsRedeemed: usedPoints,
       paymentMode,
-      amountPaid: paymentMode === "CASH" ? amountPaid : total,
+      // Non-CASH = paiement exact (carte/mobile money/mixte) → amountPaid = total.
+      amountPaid: paymentMode === "CASH" ? amountPaidEur : total,
       change,
       currency: saleCurrency,
     });
@@ -156,7 +164,7 @@ export default function POS() {
     setCustomer(null);
     setRedeemPoints(0);
     setPaymentMode("CASH");
-    setAmountPaid(0);
+    setAmountPaidInput(0);
     toast.success("Vente validée");
   };
 
@@ -248,7 +256,7 @@ export default function POS() {
               <p className="line-clamp-2 text-sm font-medium">{p.name}</p>
               <p className="mt-1 font-mono text-xs text-muted-foreground">{p.sku}</p>
               <div className="mt-2 flex items-center justify-between">
-                <span className="font-mono text-base font-bold text-primary">{fmt(p.price)}</span>
+                <span className="font-mono text-base font-bold text-primary">{fmt(p.price, saleCurrency)}</span>
                 <Badge variant="outline" className="text-[10px]">×{p.stock}</Badge>
               </div>
             </button>
@@ -279,7 +287,7 @@ export default function POS() {
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium">{i.name}</p>
-                  <p className="font-mono text-xs text-muted-foreground">{fmt(i.price)} / pc</p>
+                  <p className="font-mono text-xs text-muted-foreground">{fmt(i.price, saleCurrency)} / pc</p>
                 </div>
                 <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setCart((c) => c.filter((x) => x.productId !== i.productId))}>
                   <Trash2 className="h-3.5 w-3.5 text-destructive" />
@@ -295,7 +303,7 @@ export default function POS() {
                     <Plus className="h-3 w-3" />
                   </Button>
                 </div>
-                <span className="font-mono font-semibold">{fmt(i.quantity * i.price)}</span>
+                <span className="font-mono font-semibold">{fmt(i.quantity * i.price, saleCurrency)}</span>
               </div>
             </div>
           ))}
@@ -304,7 +312,7 @@ export default function POS() {
         <div className="mt-3 space-y-2 border-t border-border pt-3">
           <div className="flex items-center justify-between text-sm">
             <span className="text-muted-foreground">Sous-total</span>
-            <span className="font-mono">{fmt(subtotal)}</span>
+            <span className="font-mono">{fmt(subtotal, saleCurrency)}</span>
           </div>
 
           <div className="flex items-center justify-between text-sm">
@@ -341,22 +349,23 @@ export default function POS() {
           {usedPoints > 0 && (
             <div className="flex items-center justify-between text-xs text-warning">
               <span>− Réduction fidélité</span>
-              <span className="font-mono">−{fmt(pointsValue)}</span>
+              <span className="font-mono">−{fmt(pointsValue, saleCurrency)}</span>
             </div>
           )}
 
           <div className="flex items-center justify-between text-sm">
             <span className="text-muted-foreground">TVA ({settings.taxRate}%)</span>
-            <span className="font-mono">{fmt(tax)}</span>
+            <span className="font-mono">{fmt(tax, saleCurrency)}</span>
           </div>
 
           <div className="flex items-center justify-between gap-2 text-sm">
             <span className="text-muted-foreground">Paiement</span>
             <Select value={paymentMode} onValueChange={(v: PaymentMode) => setPaymentMode(v)}>
-              <SelectTrigger className="h-7 w-32"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="h-7 w-36"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="CASH">Espèces</SelectItem>
                 <SelectItem value="CARD">Carte</SelectItem>
+                <SelectItem value="MOBILE_MONEY">Mobile Money</SelectItem>
                 <SelectItem value="MIXED">Mixte</SelectItem>
               </SelectContent>
             </Select>
@@ -376,18 +385,21 @@ export default function POS() {
           {paymentMode === "CASH" && (
             <div className="space-y-1">
               <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">Reçu</span>
+                <span className="text-muted-foreground">Reçu ({currencySymbol(saleCurrency)})</span>
                 <Input
-                  type="number" step="0.01" min={0} value={amountPaid || ""}
-                  onChange={(e) => setAmountPaid(+e.target.value || 0)}
-                  placeholder="0.00"
-                  className="h-7 w-24 text-right font-mono"
+                  type="number"
+                  step={saleCurrency === "AR" ? "1" : "0.01"}
+                  min={0}
+                  value={amountPaidInput || ""}
+                  onChange={(e) => setAmountPaidInput(+e.target.value || 0)}
+                  placeholder={saleCurrency === "AR" ? "0" : "0.00"}
+                  className="h-7 w-28 text-right font-mono"
                 />
               </div>
               {change > 0 && (
                 <div className="flex items-center justify-between text-sm font-semibold text-success">
                   <span>Rendu monnaie</span>
-                  <span className="font-mono">{fmt(change)}</span>
+                  <span className="font-mono">{fmt(change, saleCurrency)}</span>
                 </div>
               )}
             </div>
@@ -395,7 +407,7 @@ export default function POS() {
 
           <div className="flex items-center justify-between border-t border-border pt-2">
             <span className="font-display text-lg font-bold">Total</span>
-            <span className="font-mono text-2xl font-bold text-primary">{fmt(total)}</span>
+            <span className="font-mono text-2xl font-bold text-primary">{fmt(total, saleCurrency)}</span>
           </div>
           <Button
             className="h-12 w-full gradient-primary text-base text-primary-foreground hover:opacity-90"
@@ -468,7 +480,7 @@ export default function POS() {
                 {receipt.pointsRedeemed > 0 && <div className="flex justify-between text-warning"><span>Points utilisés ({receipt.pointsRedeemed})</span><span>-{fmt(receipt.pointsRedeemed * settings.euroPerPoint, receipt.currency)}</span></div>}
                 <div className="flex justify-between"><span>TVA ({receipt.taxRate}%)</span><span>{fmt(receipt.tax, receipt.currency)}</span></div>
                 <div className="flex justify-between border-t border-dashed border-border pt-1 font-bold text-base text-primary"><span>TOTAL</span><span>{fmt(receipt.total, receipt.currency)}</span></div>
-                <div className="flex justify-between"><span>Paiement</span><span>{receipt.paymentMode === "CASH" ? "Espèces" : receipt.paymentMode === "CARD" ? "Carte" : "Mixte"}</span></div>
+                <div className="flex justify-between"><span>Paiement</span><span>{paymentLabel(receipt.paymentMode)}</span></div>
                 {receipt.paymentMode === "CASH" && receipt.change != null && receipt.change > 0 && (
                   <div className="flex justify-between"><span>Rendu</span><span>{fmt(receipt.change, receipt.currency)}</span></div>
                 )}

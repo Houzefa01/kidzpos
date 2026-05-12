@@ -8,21 +8,37 @@ import { useExchange } from "@/store/exchange";
 const fmtAr = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 });
 const fmtEur = new Intl.NumberFormat("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+/**
+ * Helper pur — formate un montant EUR dans la devise demandée avec le taux fourni.
+ * Utilisable hors composant React (PDF, exports, tests).
+ */
+export function formatMoneyAs(amountEur: number, currency: "AR" | "EUR", rate: number): string {
+  if (currency === "AR") return `${fmtAr.format(Math.round(amountEur * rate))} Ar`;
+  return `${fmtEur.format(amountEur)} €`;
+}
+
+/**
+ * Saisie utilisateur (dans la devise affichée) → montant EUR à stocker.
+ * Inverse de formatMoneyAs. Si rate <= 0, retourne 0 pour éviter NaN/Infinity.
+ */
+export function parseMoneyToEur(amount: number, currency: "AR" | "EUR", rate: number): number {
+  if (!Number.isFinite(amount)) return 0;
+  if (currency === "AR") return rate > 0 ? amount / rate : 0;
+  return amount;
+}
+
 /** Tous les montants stockés en interne sont en EUR (cohérent avec le backend).
  *  Cette fonction retourne la chaîne formatée dans la devise courante. */
 export function formatMoney(amountEur: number): string {
   const { currency } = useSettings.getState().settings;
-  if (currency === "AR") {
-    const rate = useExchange.getState().rate;
-    const ar = amountEur * rate;
-    return `${fmtAr.format(Math.round(ar))} Ar`;
-  }
-  return `${fmtEur.format(amountEur)} €`;
+  const rate = useExchange.getState().rate;
+  return formatMoneyAs(amountEur, currency, rate);
 }
 
-/** Symbole court ("Ar" / "€") pour les libellés. */
-export function currencySymbol(): string {
-  return useSettings.getState().settings.currency === "AR" ? "Ar" : "€";
+/** Symbole court ("Ar" / "€") pour les libellés. Accepte un override (ex: devise figée d'une vente). */
+export function currencySymbol(override?: "AR" | "EUR"): string {
+  const cur = override ?? useSettings.getState().settings.currency;
+  return cur === "AR" ? "Ar" : "€";
 }
 
 /**
@@ -35,9 +51,6 @@ export function useFormatMoney() {
   const rate = useExchange((s) => s.rate);
   // `override` permet d'afficher un montant dans la devise figée d'une vente passée
   // (cf. Sale.currency), indépendamment du réglage global courant.
-  return (amountEur: number, override?: "AR" | "EUR") => {
-    const cur = override ?? currency;
-    if (cur === "AR") return `${fmtAr.format(Math.round(amountEur * rate))} Ar`;
-    return `${fmtEur.format(amountEur)} €`;
-  };
+  return (amountEur: number, override?: "AR" | "EUR") =>
+    formatMoneyAs(amountEur, override ?? currency, rate);
 }

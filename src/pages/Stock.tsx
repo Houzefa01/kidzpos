@@ -417,8 +417,8 @@ function ProductDialog({ editing, onSave, stores, categories }: {
           <CategoryCombobox value={form.category} onChange={(v) => setForm({ ...form, category: v })} options={categories} />
         </div>
         <div className="space-y-2">
-          <Label>Prix (€) *</Label>
-          <Input type="number" step="0.01" value={form.price || ""} onChange={(e) => setForm({ ...form, price: +e.target.value || 0 })} />
+          <Label>Prix (Ar) *</Label>
+          <Input type="number" step="1" min={0} value={form.price || ""} onChange={(e) => setForm({ ...form, price: +e.target.value || 0 })} />
         </div>
         <div className="space-y-2">
           <Label>Stock</Label>

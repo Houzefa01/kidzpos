@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ShieldCheck, ArrowRight, Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import { Button, BrandMark } from "@/components/ds";
+import { Button, BrandMark, StatusDot } from "@/components/ds";
 
 const demoAccounts = import.meta.env.DEV
   ? [
@@ -76,7 +76,7 @@ export default function Login() {
         {/* Hero copy */}
         <div className="relative max-w-[34rem] space-y-6">
           <span className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1 text-xs font-medium text-muted-foreground">
-            <span className="h-1.5 w-1.5 rounded-full bg-success" />
+            <StatusDot tone="success" />
             En ligne · sync temps réel
           </span>
           <h1 className="text-[clamp(2.4rem,4.6vw,3.6rem)] font-semibold leading-[1.05] tracking-hero">

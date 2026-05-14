@@ -17,6 +17,9 @@ export type { IconButtonProps } from "./IconButton";
 export { CategoryIcon } from "./CategoryIcon";
 export type { CategoryIconProps } from "./CategoryIcon";
 
+export { StatusDot } from "./StatusDot";
+export type { StatusDotProps, StatusDotTone, StatusDotSize } from "./StatusDot";
+
 export { BrandMark } from "./BrandMark";
 export { PageHeader } from "./PageHeader";
 export type { PageHeaderProps } from "./PageHeader";

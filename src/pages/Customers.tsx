@@ -87,9 +87,9 @@ export default function Customers() {
             <DialogContent>
               <DialogHeader><DialogTitle>{editing ? "Modifier" : "Nouveau"} client</DialogTitle></DialogHeader>
               <div className="space-y-3">
-                <div className="space-y-1.5"><Label>Nom</Label><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} autoFocus /></div>
-                <div className="space-y-1.5"><Label>Téléphone</Label><Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></div>
-                <div className="space-y-1.5"><Label>Email</Label><Input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></div>
+                <div className="space-y-1.5"><Label htmlFor="cust-name">Nom</Label><Input id="cust-name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} autoFocus /></div>
+                <div className="space-y-1.5"><Label htmlFor="cust-phone">Téléphone</Label><Input id="cust-phone" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></div>
+                <div className="space-y-1.5"><Label htmlFor="cust-email">Email</Label><Input id="cust-email" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></div>
               </div>
               <DialogFooter><Button variant="gradient" onClick={submit}>Enregistrer</Button></DialogFooter>
             </DialogContent>

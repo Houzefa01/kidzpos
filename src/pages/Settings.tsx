@@ -11,7 +11,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Download, Upload, RefreshCw, Save, Server, RotateCw, Wifi, Plus, Trash2, Lock } from "lucide-react";
 import { toast } from "sonner";
 import { getApiUrl, setApiUrl } from "@/lib/apiConfig";
-import { Button, IconButton, PageHeader, Section, EmptyState } from "@/components/ds";
+import { Button, IconButton, PageHeader, Section, EmptyState, StatusDot } from "@/components/ds";
 
 export default function Settings() {
   const { user } = useAuth();
@@ -103,7 +103,7 @@ export default function Settings() {
           </div>
         </div>
         <div className="mt-3 flex items-center gap-2 text-xs">
-          <span className={`inline-block h-2 w-2 rounded-full ${lanReachable ? "bg-success" : "bg-destructive"}`} />
+          <StatusDot tone={lanReachable ? "success" : "destructive"} size="md" />
           {lanReachable ? "Connecté au serveur" : "Serveur injoignable — mode local"}
           {pendingCount > 0 && <span className="text-warning">· {pendingCount} action(s) en file</span>}
         </div>

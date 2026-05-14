@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useFormatMoney, parseMoneyToAr, currencySymbol } from "@/lib/money";
-import { Button, CategoryIcon, PageHeader, SearchInput, FilterSelect, KbdHint, ReceiptOverlay } from "@/components/ds";
+import { Button, CategoryIcon, PageHeader, SearchInput, FilterSelect, KbdHint, ReceiptOverlay, StatusDot } from "@/components/ds";
 
 export default function POS() {
   const { user } = useAuth();
@@ -374,7 +374,7 @@ export default function POS() {
                   {cartCount} art.
                 </span>
               </div>
-              <span className="h-1.5 w-1.5 rounded-full bg-primary" aria-hidden="true" />
+              <StatusDot tone="primary" />
             </div>
             <div className="border-b border-border px-5 py-3">
               <CustomerPicker value={customer} onChange={(c) => { setCustomer(c); setRedeemPoints(0); }} />

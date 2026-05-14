@@ -355,12 +355,12 @@ function AdjustDialog({ product, onClose, onApply }: { product: Product; onClose
         <p className="text-xs text-muted-foreground">Stock actuel : <span className="font-mono font-bold">{product.stock}</span></p>
         <div className="space-y-3">
           <div className="space-y-1.5">
-            <Label>Variation (positive = entrée, négative = sortie)</Label>
-            <Input type="number" value={delta} onChange={(e) => setDelta(parseInt(e.target.value) || 0)} autoFocus />
+            <Label htmlFor="adj-delta">Variation (positive = entrée, négative = sortie)</Label>
+            <Input id="adj-delta" type="number" value={delta} onChange={(e) => setDelta(parseInt(e.target.value) || 0)} autoFocus />
           </div>
           <div className="space-y-1.5">
-            <Label>Motif</Label>
-            <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Réception fournisseur, casse, inventaire..." />
+            <Label htmlFor="adj-reason">Motif</Label>
+            <Input id="adj-reason" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Réception fournisseur, casse, inventaire..." />
           </div>
           <p className="text-sm">Nouveau stock : <span className="font-mono font-bold">{product.stock + delta}</span></p>
         </div>
@@ -395,15 +395,15 @@ function TransferDialog({ product, stores, onClose, onApply }: { product: Produc
         <p className="text-xs text-muted-foreground">Stock disponible : <span className="font-mono font-bold">{product.stock}</span></p>
         <div className="space-y-3">
           <div className="space-y-1.5">
-            <Label>Vers le magasin</Label>
+            <Label htmlFor="xfer-store">Vers le magasin</Label>
             <Select value={toStoreId} onValueChange={setToStoreId}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectTrigger id="xfer-store"><SelectValue /></SelectTrigger>
               <SelectContent>{others.map((s) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
             </Select>
           </div>
           <div className="space-y-1.5">
-            <Label>Quantité</Label>
-            <Input type="number" min={1} max={product.stock} value={qty} onChange={(e) => setQty(parseInt(e.target.value) || 0)} />
+            <Label htmlFor="xfer-qty">Quantité</Label>
+            <Input id="xfer-qty" type="number" min={1} max={product.stock} value={qty} onChange={(e) => setQty(parseInt(e.target.value) || 0)} />
           </div>
         </div>
         <DialogFooter>
@@ -438,29 +438,29 @@ function ProductDialog({ editing, onSave, stores, categories }: {
       <DialogHeader><DialogTitle>{editing ? "Modifier" : "Nouveau"} produit</DialogTitle></DialogHeader>
       <div className="grid grid-cols-2 gap-4">
         <div className="col-span-2 space-y-2">
-          <Label>Nom *</Label>
-          <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} autoFocus />
+          <Label htmlFor="prod-name">Nom *</Label>
+          <Input id="prod-name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} autoFocus />
         </div>
         <div className="space-y-2">
-          <Label>Référence (SKU)</Label>
-          <Input value={form.sku} onChange={(e) => setForm({ ...form, sku: e.target.value })} placeholder="auto si vide" />
+          <Label htmlFor="prod-sku">Référence (SKU)</Label>
+          <Input id="prod-sku" value={form.sku} onChange={(e) => setForm({ ...form, sku: e.target.value })} placeholder="auto si vide" />
         </div>
         <div className="space-y-2">
-          <Label>Catégorie (facultatif)</Label>
-          <CategoryCombobox value={form.category} onChange={(v) => setForm({ ...form, category: v })} options={categories} />
+          <Label htmlFor="prod-category">Catégorie (facultatif)</Label>
+          <CategoryCombobox id="prod-category" value={form.category} onChange={(v) => setForm({ ...form, category: v })} options={categories} />
         </div>
         <div className="space-y-2">
-          <Label>Prix (Ar) *</Label>
-          <Input type="number" step="1" min={0} value={form.price || ""} onChange={(e) => setForm({ ...form, price: +e.target.value || 0 })} />
+          <Label htmlFor="prod-price">Prix (Ar) *</Label>
+          <Input id="prod-price" type="number" step="1" min={0} value={form.price || ""} onChange={(e) => setForm({ ...form, price: +e.target.value || 0 })} />
         </div>
         <div className="space-y-2">
-          <Label>Stock</Label>
-          <Input type="number" value={form.stock} onChange={(e) => setForm({ ...form, stock: +e.target.value || 0 })} />
+          <Label htmlFor="prod-stock">Stock</Label>
+          <Input id="prod-stock" type="number" value={form.stock} onChange={(e) => setForm({ ...form, stock: +e.target.value || 0 })} />
         </div>
         <div className="col-span-2 space-y-2">
-          <Label>Magasin</Label>
+          <Label htmlFor="prod-store">Magasin</Label>
           <Select value={form.storeId} onValueChange={(v) => setForm({ ...form, storeId: v })}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectTrigger id="prod-store"><SelectValue /></SelectTrigger>
             <SelectContent>{stores.map((s) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
           </Select>
         </div>

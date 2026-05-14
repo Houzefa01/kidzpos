@@ -6,13 +6,14 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 interface Props {
+  id?: string;
   value?: string;
   onChange: (v: string | undefined) => void;
   options: string[];
   placeholder?: string;
 }
 
-export function CategoryCombobox({ value, onChange, options, placeholder = "Catégorie (facultatif)" }: Props) {
+export function CategoryCombobox({ id, value, onChange, options, placeholder = "Catégorie (facultatif)" }: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
 
@@ -27,7 +28,7 @@ export function CategoryCombobox({ value, onChange, options, placeholder = "Cat�
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button variant="outline" role="combobox" className="w-full justify-between font-normal">
+        <Button id={id} variant="outline" role="combobox" className="w-full justify-between font-normal">
           <span className="truncate">{value || <span className="text-muted-foreground">{placeholder}</span>}</span>
           <div className="flex items-center gap-1">
             {value && (

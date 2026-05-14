@@ -109,9 +109,7 @@ public class SaleController {
         }
 
         double pointsValue = req.pointsRedeemed() * s.getArPerPoint();
-        double afterDiscount = Math.max(0, subtotal - discount - pointsValue);
-        double tax = afterDiscount * s.getTaxRate() / 100.0;
-        double total = afterDiscount + tax;
+        double total = Math.max(0, subtotal - discount - pointsValue);
         int pointsEarned = (int) Math.floor(total * s.getPointsPerAr());
 
         long seq = sales.findMaxSeqByStoreId(req.storeId()).orElse(0L) + 1;
@@ -130,7 +128,7 @@ public class SaleController {
                 .id(saleId).seq(seq)
                 .storeId(req.storeId())
                 .userId(me.id()).userName(me.name())
-                .subtotal(round(subtotal)).tax(round(tax)).taxRate(s.getTaxRate())
+                .subtotal(round(subtotal))
                 .discount(round(discount)).total(round(total))
                 .date(Instant.now())
                 .customerId(req.customerId()).customerName(null)
@@ -199,7 +197,7 @@ public class SaleController {
         Sale refund = Sale.builder()
                 .id(id).seq(seq).storeId(orig.getStoreId())
                 .userId(me.id()).userName(me.name())
-                .subtotal(-orig.getSubtotal()).tax(-orig.getTax()).taxRate(orig.getTaxRate())
+                .subtotal(-orig.getSubtotal())
                 .discount(-orig.getDiscount()).total(-orig.getTotal())
                 .date(Instant.now())
                 .pointsEarned(0).pointsRedeemed(0)

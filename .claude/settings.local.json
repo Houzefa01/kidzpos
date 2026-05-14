@@ -36,7 +36,27 @@
       "Bash(pg_isready -h localhost -p 5432)",
       "Bash(./start-server.sh *)",
       "Bash(mvn -q -DskipTests package)",
-      "Bash(PGPASSWORD=kidzpos psql -h localhost -U kidzpos -d kidzpos -c \"SELECT conname, pg_get_constraintdef\\(oid\\) FROM pg_constraint WHERE conrelid='sales'::regclass AND contype='c';\")"
+      "Bash(PGPASSWORD=kidzpos psql -h localhost -U kidzpos -d kidzpos -c \"SELECT conname, pg_get_constraintdef\\(oid\\) FROM pg_constraint WHERE conrelid='sales'::regclass AND contype='c';\")",
+      "Bash(git -C /home/Hsavatra/Bureau/sync-till-genius-main diff --stat HEAD)",
+      "Bash(curl -s -o /dev/null -w \"GET / → HTTP %{http_code}\\\\n\" http://localhost:5173/)",
+      "Bash(curl -s -o /dev/null -w \"GET /login → HTTP %{http_code}\\\\n\" http://localhost:5173/login)",
+      "Bash(curl -s -o /dev/null -w \"GET /pos → HTTP %{http_code}\\\\n\" http://localhost:5173/pos)",
+      "Bash(curl -s -o /dev/null -w \"GET /sales → HTTP %{http_code}\\\\n\" http://localhost:5173/sales)",
+      "Bash(curl -s \"http://localhost:5173/src/pages/Login.tsx\" -o /dev/null -w \"%{http_code}\\\\n\")",
+      "Bash(curl -s \"http://localhost:5173/src/pages/POS.tsx\" -o /dev/null -w \"%{http_code}\\\\n\")",
+      "Bash(curl -s \"http://localhost:5173/src/pages/Sales.tsx\" -o /dev/null -w \"%{http_code}\\\\n\")",
+      "Bash(curl -s \"http://localhost:5173/src/components/AppSidebar.tsx\" -o /dev/null -w \"%{http_code}\\\\n\")",
+      "Bash(curl -s \"http://localhost:5173/src/index.css?direct&import\" -o /dev/null -w \"%{http_code}\\\\n\")",
+      "Bash(kill %1)",
+      "Bash(git -C /home/Hsavatra/Bureau/sync-till-genius-main log --oneline)",
+      "Bash(git -C /home/Hsavatra/Bureau/sync-till-genius-main log --format=\"%ai\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:5173/ http://localhost:5173/login http://localhost:5173/pos http://localhost:5173/sales)",
+      "Bash(curl -s -o /dev/null -w '%{http_code}' 'http://localhost:5173/__TRACKED_VAR__?direct&import')",
+      "Bash(npx eslint *)",
+      "Bash(grep -iE \"^.*\\\\.js$\")",
+      "Bash(mvn compile *)",
+      "Bash(gh auth *)",
+      "Bash(git checkout *)"
     ]
   }
 }

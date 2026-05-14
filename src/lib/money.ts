@@ -15,13 +15,22 @@ const fmtEur = new Intl.NumberFormat("fr-FR", { minimumFractionDigits: 2, maximu
  * Utilisable hors composant React (PDF, exports, tests).
  *
  * `rate` = nombre d'Ariary par 1 EUR (ex: 4900). Pour AR→EUR : on divise.
+ * `opts.withSymbol = false` retire " Ar" / " €" du résultat (utile pour les gros
+ * affichages où le symbole est rendu séparément, type cadran de total).
  */
-export function formatMoneyAs(amountAr: number, currency: "AR" | "EUR", rate: number): string {
+export function formatMoneyAs(
+  amountAr: number,
+  currency: "AR" | "EUR",
+  rate: number,
+  opts?: { withSymbol?: boolean },
+): string {
+  const withSymbol = opts?.withSymbol !== false;
   if (currency === "EUR") {
-    if (rate <= 0) return `${fmtEur.format(0)} €`;
-    return `${fmtEur.format(amountAr / rate)} €`;
+    const eur = rate <= 0 ? 0 : amountAr / rate;
+    return withSymbol ? `${fmtEur.format(eur)} €` : fmtEur.format(eur);
   }
-  return `${fmtAr.format(Math.round(amountAr))} Ar`;
+  const ar = fmtAr.format(Math.round(amountAr));
+  return withSymbol ? `${ar} Ar` : ar;
 }
 
 /**
@@ -55,6 +64,6 @@ export function useFormatMoney() {
   const rate = useExchange((s) => s.rate);
   // `override` permet d'afficher un montant dans la devise figée d'une vente passée
   // (cf. Sale.currency), indépendamment du réglage global courant.
-  return (amountAr: number, override?: "AR" | "EUR") =>
-    formatMoneyAs(amountAr, override ?? currency, rate);
+  return (amountAr: number, override?: "AR" | "EUR", opts?: { withSymbol?: boolean }) =>
+    formatMoneyAs(amountAr, override ?? currency, rate, opts);
 }

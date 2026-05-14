@@ -52,7 +52,7 @@ public class DataInitializer implements CommandLineRunner {
 
         if (settings.count() == 0) {
             settings.save(Settings.builder().id(1L)
-                    .taxRate(20).maxDiscountPercent(10)
+                    .maxDiscountPercent(10)
                     // Ariary canonical : 5000 Ar dépensés → 1 point ; 1 point = 100 Ar.
                     // Soit ~2% de retour fidélité. Ajustable via Paramètres.
                     .pointsPerAr(0.0002).arPerPoint(100)

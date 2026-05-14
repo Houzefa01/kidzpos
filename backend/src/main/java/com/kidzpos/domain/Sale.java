@@ -26,8 +26,6 @@ public class Sale {
     private List<SaleItem> items = new ArrayList<>();
 
     @Column(nullable = false) private double subtotal;
-    @Column(nullable = false) private double tax;
-    @Column(nullable = false) private double taxRate;
     @Column(nullable = false) private double discount;
     @Column(nullable = false) private double total;
     @Column(nullable = false) private Instant date;

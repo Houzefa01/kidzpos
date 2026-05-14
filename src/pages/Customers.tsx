@@ -3,16 +3,16 @@ import { useCustomers, Customer } from "@/store/customers";
 import { useData } from "@/store/data";
 import { useAuth } from "@/store/auth";
 import { Card } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { Plus, Search, Star, Trash2, Pencil, Gift } from "lucide-react";
+import { Plus, Star, Trash2, Pencil, Gift } from "lucide-react";
 import { toast } from "sonner";
 import { useFormatMoney } from "@/lib/money";
+import { Button, IconButton, PageHeader, Section, SearchInput } from "@/components/ds";
 
 export default function Customers() {
   const { user } = useAuth();
@@ -73,37 +73,40 @@ export default function Customers() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="font-display text-3xl font-bold">Clients & Fidélité</h1>
-          <p className="text-sm text-muted-foreground">{filtered.length} client(s) · gérez la fidélisation</p>
-        </div>
-        <Dialog open={open} onOpenChange={setOpen}>
-          <DialogTrigger asChild>
-            <Button className="gradient-primary text-primary-foreground hover:opacity-90" onClick={openCreate}>
-              <Plus className="mr-2 h-4 w-4" /> Nouveau client
-            </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader><DialogTitle>{editing ? "Modifier" : "Nouveau"} client</DialogTitle></DialogHeader>
-            <div className="space-y-3">
-              <div className="space-y-1.5"><Label>Nom</Label><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} autoFocus /></div>
-              <div className="space-y-1.5"><Label>Téléphone</Label><Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></div>
-              <div className="space-y-1.5"><Label>Email</Label><Input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></div>
-            </div>
-            <DialogFooter><Button className="gradient-primary text-primary-foreground" onClick={submit}>Enregistrer</Button></DialogFooter>
-          </DialogContent>
-        </Dialog>
-      </div>
+      <PageHeader
+        eyebrow="Fidélité"
+        title="Clients & Fidélité"
+        subtitle={`${filtered.length} client(s) · gérez la fidélisation`}
+        actions={
+          <Dialog open={open} onOpenChange={setOpen}>
+            <DialogTrigger asChild>
+              <Button variant="gradient" onClick={openCreate}>
+                <Plus className="mr-2 h-4 w-4" /> Nouveau client
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader><DialogTitle>{editing ? "Modifier" : "Nouveau"} client</DialogTitle></DialogHeader>
+              <div className="space-y-3">
+                <div className="space-y-1.5"><Label>Nom</Label><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} autoFocus /></div>
+                <div className="space-y-1.5"><Label>Téléphone</Label><Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></div>
+                <div className="space-y-1.5"><Label>Email</Label><Input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></div>
+              </div>
+              <DialogFooter><Button variant="gradient" onClick={submit}>Enregistrer</Button></DialogFooter>
+            </DialogContent>
+          </Dialog>
+        }
+      />
 
-      <Card className="gradient-card border-border p-4">
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Rechercher nom, téléphone..." className="pl-9" />
-        </div>
-      </Card>
+      <Section padding="sm">
+        <SearchInput
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Rechercher nom, téléphone..."
+          aria-label="Rechercher un client"
+        />
+      </Section>
 
-      <Card className="gradient-card border-border">
+      <Section padding="none">
         <Table>
           <TableHeader>
             <TableRow>
@@ -129,10 +132,10 @@ export default function Customers() {
                 </TableCell>
                 <TableCell>
                   <div className="flex justify-end gap-1" onClick={(e) => e.stopPropagation()}>
-                    <Button size="icon" variant="ghost" onClick={() => openEdit(c)}><Pencil className="h-4 w-4" /></Button>
+                    <IconButton icon={Pencil} onClick={() => openEdit(c)} aria-label={`Modifier ${c.name || c.phone || "le client"}`} />
                     {isAdmin && (
                       <ConfirmDialog
-                        trigger={<Button size="icon" variant="ghost"><Trash2 className="h-4 w-4 text-destructive" /></Button>}
+                        trigger={<IconButton icon={Trash2} tone="destructive" aria-label="Supprimer le client" />}
                         title={`Supprimer "${c.name || c.phone || 'ce client'}" ?`}
                         description="Les ventes passées resteront mais ne seront plus rattachées."
                         destructive
@@ -148,17 +151,29 @@ export default function Customers() {
             )}
           </TableBody>
         </Table>
-      </Card>
+      </Section>
 
+      {/* Detail dialog — pattern local (3 mini-stats centrées + ajustement points + historique).
+          Labels/values calqués sur les tokens Stat (eyebrow + tracking-display) pour
+          rester cohérent visuellement sans extraire un composant pour 3 instances. */}
       <Dialog open={!!detail} onOpenChange={(v) => { if (!v) { setDetail(null); setPointsDelta(0); } }}>
         <DialogContent className="max-w-lg">
           <DialogHeader><DialogTitle>{detail?.name || detail?.phone || "Client"}</DialogTitle></DialogHeader>
           {detail && (
             <div className="space-y-3 text-sm">
               <div className="grid grid-cols-3 gap-2">
-                <Card className="p-3 text-center"><p className="text-xs text-muted-foreground">Visites</p><p className="font-display text-2xl font-bold">{detail.visits}</p></Card>
-                <Card className="p-3 text-center"><p className="text-xs text-muted-foreground">Dépensé</p><p className="font-display text-2xl font-bold text-primary">{fmt(detail.totalSpent)}</p></Card>
-                <Card className="p-3 text-center"><p className="text-xs text-muted-foreground">Points</p><p className="font-display text-2xl font-bold text-warning">{detail.points}</p></Card>
+                <Card className="p-3 text-center">
+                  <p className="text-2xs font-medium uppercase tracking-eyebrow text-muted-foreground">Visites</p>
+                  <p className="mt-1 font-mono text-2xl font-semibold tracking-display">{detail.visits}</p>
+                </Card>
+                <Card className="p-3 text-center">
+                  <p className="text-2xs font-medium uppercase tracking-eyebrow text-muted-foreground">Dépensé</p>
+                  <p className="mt-1 font-mono text-2xl font-semibold tracking-display text-primary">{fmt(detail.totalSpent)}</p>
+                </Card>
+                <Card className="p-3 text-center">
+                  <p className="text-2xs font-medium uppercase tracking-eyebrow text-muted-foreground">Points</p>
+                  <p className="mt-1 font-mono text-2xl font-semibold tracking-display text-warning">{detail.points}</p>
+                </Card>
               </div>
               {isAdmin && (
                 <Card className="p-3">

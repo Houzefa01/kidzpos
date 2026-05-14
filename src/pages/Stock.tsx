@@ -1,8 +1,6 @@
 import { useMemo, useState } from "react";
 import { useAuth } from "@/store/auth";
 import { useData, Product, StockMove } from "@/store/data";
-import { Card } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
@@ -12,10 +10,11 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CategoryCombobox } from "@/components/CategoryCombobox";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { Plus, Pencil, Trash2, Search, ArrowUp, ArrowDown, ArrowUpDown, Upload, ArrowLeftRight, PackagePlus } from "lucide-react";
+import { Plus, Pencil, Trash2, ArrowUp, ArrowDown, ArrowUpDown, Upload, ArrowLeftRight, PackagePlus } from "lucide-react";
 import { toast } from "sonner";
 import { ProductCsvRowSchema } from "@/lib/schemas";
 import { useFormatMoney } from "@/lib/money";
+import { Button, CategoryIcon, IconButton, PageHeader, Section, SearchInput, FilterSelect } from "@/components/ds";
 
 type SortKey = "name" | "sku" | "category" | "price" | "stock" | "createdAt";
 type SortDir = "asc" | "desc";
@@ -131,29 +130,36 @@ export default function Stock() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="font-display text-3xl font-bold">Stock & Produits</h1>
-          <p className="text-sm text-muted-foreground">{filtered.length} produit(s) affiché(s)</p>
-        </div>
-        {isAdmin && (
-          <div className="flex gap-2">
-            <label>
-              <input type="file" accept=".csv" className="hidden"
-                onChange={(e) => { const f = e.target.files?.[0]; if (f) onCsvImport(f); e.target.value = ""; }} />
-              <Button variant="outline" asChild><span><Upload className="mr-2 h-4 w-4" /> Import CSV</span></Button>
-            </label>
-            <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) setEditing(null); }}>
-              <DialogTrigger asChild>
-                <Button className="gradient-primary text-primary-foreground hover:opacity-90">
-                  <Plus className="mr-2 h-4 w-4" /> Nouveau produit
+      <PageHeader
+        eyebrow="Inventaire"
+        title="Stock & Produits"
+        subtitle={`${filtered.length} produit(s) affiché(s)`}
+        actions={
+          isAdmin ? (
+            <>
+              <label>
+                <input
+                  type="file"
+                  accept=".csv"
+                  className="hidden"
+                  onChange={(e) => { const f = e.target.files?.[0]; if (f) onCsvImport(f); e.target.value = ""; }}
+                />
+                <Button variant="outline" asChild>
+                  <span><Upload className="mr-2 h-4 w-4" /> Import CSV</span>
                 </Button>
-              </DialogTrigger>
-              <ProductDialog editing={editing} onSave={onSave} stores={stores} categories={allCategories} />
-            </Dialog>
-          </div>
-        )}
-      </div>
+              </label>
+              <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) setEditing(null); }}>
+                <DialogTrigger asChild>
+                  <Button variant="gradient">
+                    <Plus className="mr-2 h-4 w-4" /> Nouveau produit
+                  </Button>
+                </DialogTrigger>
+                <ProductDialog editing={editing} onSave={onSave} stores={stores} categories={allCategories} />
+              </Dialog>
+            </>
+          ) : undefined
+        }
+      />
 
       <Tabs defaultValue="list">
         <TabsList>
@@ -162,40 +168,45 @@ export default function Stock() {
         </TabsList>
 
         <TabsContent value="list" className="space-y-4">
-          <Card className="gradient-card border-border p-4">
+          <Section padding="sm">
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              <div className="relative lg:col-span-2">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Rechercher nom, référence, catégorie..." className="pl-9" />
-              </div>
+              <SearchInput
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Rechercher nom, référence, catégorie..."
+                aria-label="Rechercher un produit"
+                wrapperClassName="lg:col-span-2"
+              />
               {isAdmin && (
-                <Select value={filterStore} onValueChange={setFilterStore}>
-                  <SelectTrigger><SelectValue placeholder="Magasin" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Tous les magasins</SelectItem>
-                    {stores.map((s) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
+                <FilterSelect
+                  value={filterStore}
+                  onValueChange={setFilterStore}
+                  options={stores.map((s) => ({ value: s.id, label: s.name }))}
+                  allLabel="Tous les magasins"
+                  aria-label="Filtre magasin"
+                />
               )}
-              <Select value={filterCategory} onValueChange={setFilterCategory}>
-                <SelectTrigger><SelectValue placeholder="Catégorie" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Toutes catégories</SelectItem>
-                  {allCategories.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-                </SelectContent>
-              </Select>
-              <Select value={stockFilter} onValueChange={(v: "all" | "low" | "out") => setStockFilter(v)}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Tout stock</SelectItem>
-                  <SelectItem value="low">Stock faible (≤3)</SelectItem>
-                  <SelectItem value="out">Rupture</SelectItem>
-                </SelectContent>
-              </Select>
+              <FilterSelect
+                value={filterCategory}
+                onValueChange={setFilterCategory}
+                options={allCategories.map((c) => ({ value: c, label: c }))}
+                allLabel="Toutes catégories"
+                aria-label="Filtre catégorie"
+              />
+              <FilterSelect
+                value={stockFilter}
+                onValueChange={(v) => setStockFilter(v as "all" | "low" | "out")}
+                options={[
+                  { value: "low", label: "Stock faible (≤3)" },
+                  { value: "out", label: "Rupture" },
+                ]}
+                allLabel="Tout stock"
+                aria-label="Filtre niveau de stock"
+              />
             </div>
-          </Card>
+          </Section>
 
-          <Card className="gradient-card border-border">
+          <Section padding="none">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -213,27 +224,49 @@ export default function Stock() {
                   const store = stores.find((s) => s.id === p.storeId);
                   return (
                     <TableRow key={p.id}>
-                      <TableCell className="font-medium">{p.name}</TableCell>
+                      <TableCell className="font-medium">
+                        <div className="flex items-center gap-2.5">
+                          <CategoryIcon category={p.category} className="h-7 w-7" iconClassName="h-4 w-4" />
+                          <span className="truncate">{p.name}</span>
+                        </div>
+                      </TableCell>
                       <TableCell className="font-mono text-xs text-muted-foreground">{p.sku}</TableCell>
                       <TableCell>{p.category ? <Badge variant="outline">{p.category}</Badge> : <span className="text-xs text-muted-foreground">—</span>}</TableCell>
                       <TableCell className="text-xs">{store?.name.split("—")[0]}</TableCell>
                       <TableCell className="text-right font-mono">{fmt(p.price)}</TableCell>
                       <TableCell className="text-right">
-                        <button onClick={() => isAdmin && setAdjustOpen(p)} disabled={!isAdmin} title={isAdmin ? "Cliquer pour ajuster" : ""}>
-                          <Badge variant={p.stock === 0 ? "destructive" : p.stock <= 3 ? "secondary" : "outline"}
-                            className={p.stock <= 3 && p.stock > 0 ? "border-warning/50 text-warning" : ""}>
+                        {isAdmin ? (
+                          <button
+                            type="button"
+                            onClick={() => setAdjustOpen(p)}
+                            title="Cliquer pour ajuster"
+                            aria-label={`Ajuster le stock de ${p.name}`}
+                            className="rounded-md transition hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
+                          >
+                            <Badge
+                              variant={p.stock === 0 ? "destructive" : p.stock <= 3 ? "secondary" : "outline"}
+                              className={p.stock <= 3 && p.stock > 0 ? "border-warning/50 text-warning" : ""}
+                            >
+                              {p.stock}
+                            </Badge>
+                          </button>
+                        ) : (
+                          <Badge
+                            variant={p.stock === 0 ? "destructive" : p.stock <= 3 ? "secondary" : "outline"}
+                            className={p.stock <= 3 && p.stock > 0 ? "border-warning/50 text-warning" : ""}
+                          >
                             {p.stock}
                           </Badge>
-                        </button>
+                        )}
                       </TableCell>
                       {isAdmin && (
                         <TableCell>
                           <div className="flex justify-end gap-1">
-                            <Button size="icon" variant="ghost" title="Ajuster stock" onClick={() => setAdjustOpen(p)}><PackagePlus className="h-4 w-4" /></Button>
-                            <Button size="icon" variant="ghost" title="Transférer" onClick={() => setTransferOpen(p)}><ArrowLeftRight className="h-4 w-4" /></Button>
-                            <Button size="icon" variant="ghost" title="Modifier" onClick={() => { setEditing(p); setOpen(true); }}><Pencil className="h-4 w-4" /></Button>
+                            <IconButton icon={PackagePlus} title="Ajuster stock" aria-label={`Ajuster le stock de ${p.name}`} onClick={() => setAdjustOpen(p)} />
+                            <IconButton icon={ArrowLeftRight} title="Transférer" aria-label={`Transférer ${p.name}`} onClick={() => setTransferOpen(p)} />
+                            <IconButton icon={Pencil} title="Modifier" aria-label={`Modifier ${p.name}`} onClick={() => { setEditing(p); setOpen(true); }} />
                             <ConfirmDialog
-                              trigger={<Button size="icon" variant="ghost" title="Supprimer"><Trash2 className="h-4 w-4 text-destructive" /></Button>}
+                              trigger={<IconButton icon={Trash2} tone="destructive" title="Supprimer" aria-label={`Supprimer ${p.name}`} />}
                               title={`Supprimer "${p.name}" ?`}
                               description="Le produit sera définitivement retiré. Les ventes passées restent intactes."
                               destructive
@@ -250,11 +283,11 @@ export default function Stock() {
                 )}
               </TableBody>
             </Table>
-          </Card>
+          </Section>
         </TabsContent>
 
         <TabsContent value="moves">
-          <Card className="gradient-card border-border">
+          <Section padding="none">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -274,7 +307,7 @@ export default function Stock() {
                 )}
               </TableBody>
             </Table>
-          </Card>
+          </Section>
         </TabsContent>
       </Tabs>
 
@@ -333,7 +366,7 @@ function AdjustDialog({ product, onClose, onApply }: { product: Product; onClose
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Annuler</Button>
-          <Button className="gradient-primary text-primary-foreground" disabled={delta === 0 || !reason.trim()} onClick={() => onApply(delta, reason.trim())}>Appliquer</Button>
+          <Button variant="gradient" disabled={delta === 0 || !reason.trim()} onClick={() => onApply(delta, reason.trim())}>Appliquer</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -375,7 +408,7 @@ function TransferDialog({ product, stores, onClose, onApply }: { product: Produc
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Annuler</Button>
-          <Button className="gradient-primary text-primary-foreground" disabled={qty <= 0 || qty > product.stock || !toStoreId} onClick={() => onApply(toStoreId, qty)}>Transférer</Button>
+          <Button variant="gradient" disabled={qty <= 0 || qty > product.stock || !toStoreId} onClick={() => onApply(toStoreId, qty)}>Transférer</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -436,7 +469,7 @@ function ProductDialog({ editing, onSave, stores, categories }: {
         Format CSV attendu : <code className="font-mono">name,sku,price,stock,category,storeId</code>
       </p>
       <DialogFooter>
-        <Button className="gradient-primary text-primary-foreground" onClick={submit}>Enregistrer</Button>
+        <Button variant="gradient" onClick={submit}>Enregistrer</Button>
       </DialogFooter>
     </DialogContent>
   );

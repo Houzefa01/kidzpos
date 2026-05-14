@@ -8,7 +8,6 @@ import lombok.*;
 public class Settings {
     @Id
     private Long id;          // toujours 1
-    @Column(nullable = false) private double taxRate;
     @Column(nullable = false) private double maxDiscountPercent;
     /** Devise canonique = Ariary. Points gagnés = (montant en Ar) × pointsPerAr.
      *  Conversion en EUR uniquement à l'affichage côté frontend. */

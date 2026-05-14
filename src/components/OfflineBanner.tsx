@@ -18,9 +18,13 @@ export function OfflineBanner() {
 
   if (online && lanReachable && pendingCount === 0) return null;
 
+  // Banner non-sticky en lui-même : AppLayout l'enveloppe avec le header dans
+  // un parent sticky commun, sinon banner + header sticky top-0 se chevaucheraient.
+  const baseCls = "no-print flex items-center justify-center gap-2 px-3 py-1.5 text-xs font-medium";
+
   if (!online) {
     return (
-      <div className="flex items-center justify-center gap-2 bg-warning/15 px-3 py-1.5 text-xs font-medium text-warning">
+      <div className={`${baseCls} bg-warning/15 text-foreground`}>
         <WifiOff className="h-3.5 w-3.5" />
         Mode hors-ligne — vos actions sont enregistrées localement et seront synchronisées
         {pendingCount > 0 && ` (${pendingCount} en attente)`}
@@ -30,7 +34,7 @@ export function OfflineBanner() {
 
   if (!lanReachable && showInjoignable) {
     return (
-      <div className="flex items-center justify-center gap-2 bg-warning/15 px-3 py-1.5 text-xs font-medium text-warning">
+      <div className={`${baseCls} bg-warning/15 text-foreground`}>
         <CloudOff className="h-3.5 w-3.5" />
         Serveur magasin injoignable — données sauvegardées localement
         {pendingCount > 0 && ` · ${pendingCount} action(s) en file d'attente`}
@@ -40,7 +44,7 @@ export function OfflineBanner() {
 
   if (lanReachable && pendingCount > 0) {
     return (
-      <div className="flex items-center justify-center gap-2 bg-primary/15 px-3 py-1.5 text-xs font-medium text-primary">
+      <div className={`${baseCls} bg-primary/15 text-primary`}>
         <CloudUpload className="h-3.5 w-3.5 animate-pulse" />
         Synchronisation en cours… {pendingCount} action(s) restantes
       </div>

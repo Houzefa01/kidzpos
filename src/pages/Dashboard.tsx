@@ -1,14 +1,13 @@
 import { useAuth } from "@/store/auth";
 import { useData } from "@/store/data";
 import { useSettings } from "@/store/settings";
-import { StatCard } from "@/components/StatCard";
-import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Banknote, AlertTriangle, Package, TrendingUp, TrendingDown, Star } from "lucide-react";
+import { AlertTriangle, Banknote, Hand, Package, Star, TrendingDown, TrendingUp, Undo2 } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { useMemo } from "react";
 import { useFormatMoney } from "@/lib/money";
+import { PageHeader, Section, Stat, Grid, EmptyState } from "@/components/ds";
 
 export default function Dashboard() {
   const { user } = useAuth();
@@ -87,19 +86,33 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="font-display text-3xl font-bold">Bonjour, {user?.name.split(" ")[0]} 👋</h1>
-        <p className="text-sm text-muted-foreground">
-          {isAdmin ? `Vue consolidée — ${settings.shopName}.` : "Aperçu de votre magasin."}
-        </p>
-      </div>
+      <PageHeader
+        eyebrow="Tableau de bord"
+        title={
+          <>
+            Bonjour, {user?.name.split(" ")[0]}
+            <Hand
+              aria-hidden="true"
+              className="ml-2 inline-block h-6 w-6 -translate-y-0.5 align-middle text-warning sm:h-7 sm:w-7"
+            />
+          </>
+        }
+        subtitle={isAdmin ? `Vue consolidée — ${settings.shopName}.` : "Aperçu de votre magasin."}
+      />
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Chiffre d'affaires" value={fmt(revenue)} hint={`${scopedSales.length} ventes`} icon={Banknote} tone="primary" />
-        <StatCard label="Mois en cours" value={fmt(currentMonth)} hint={`${monthDelta >= 0 ? "+" : ""}${monthDelta.toFixed(1)}% vs précédent`} icon={monthDelta >= 0 ? TrendingUp : TrendingDown} tone={monthDelta >= 0 ? "success" : "warning"} />
-        <StatCard label="Produits actifs" value={String(scopedProducts.length)} hint={isAdmin ? "tous magasins" : "votre stock"} icon={Package} tone="accent" />
-        <StatCard label="Stock faible" value={String(lowStock)} hint="≤ 3 unités" icon={AlertTriangle} tone="warning" />
-      </div>
+      <Grid cols={1} sm={2} lg={4} gap={4}>
+        <Stat className="animate-rise" label="Chiffre d'affaires" value={fmt(revenue)} hint={`${scopedSales.length} ventes`} icon={Banknote} tone="primary" />
+        <Stat
+          className="animate-rise-2"
+          label="Mois en cours"
+          value={fmt(currentMonth)}
+          hint={`${monthDelta >= 0 ? "+" : ""}${monthDelta.toFixed(1)}% vs précédent`}
+          icon={monthDelta >= 0 ? TrendingUp : TrendingDown}
+          tone={monthDelta >= 0 ? "success" : "warning"}
+        />
+        <Stat className="animate-rise-3" label="Produits actifs" value={String(scopedProducts.length)} hint={isAdmin ? "tous magasins" : "votre stock"} icon={Package} tone="accent" />
+        <Stat className="animate-rise-4" label="Stock faible" value={String(lowStock)} hint="≤ 3 unités" icon={AlertTriangle} tone="warning" />
+      </Grid>
 
       <Tabs defaultValue="week" className="space-y-4">
         <TabsList>
@@ -109,9 +122,8 @@ export default function Dashboard() {
         </TabsList>
 
         <TabsContent value="week">
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-            <Card className="gradient-card border-border p-5 lg:col-span-2">
-              <h3 className="mb-4 font-display text-lg font-semibold">Ventes — 7 derniers jours</h3>
+          <Grid cols={1} lg={3} gap={4}>
+            <Section title="Ventes — 7 derniers jours" className="lg:col-span-2">
               <div className="h-64">
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={days}>
@@ -123,10 +135,9 @@ export default function Dashboard() {
                   </LineChart>
                 </ResponsiveContainer>
               </div>
-            </Card>
+            </Section>
             {isAdmin && (
-              <Card className="gradient-card border-border p-5">
-                <h3 className="mb-4 font-display text-lg font-semibold">Par magasin</h3>
+              <Section title="Par magasin">
                 <div className="h-64">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={byStore}>
@@ -140,14 +151,13 @@ export default function Dashboard() {
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
-              </Card>
+              </Section>
             )}
-          </div>
+          </Grid>
         </TabsContent>
 
         <TabsContent value="month">
-          <Card className="gradient-card border-border p-5">
-            <h3 className="mb-4 font-display text-lg font-semibold">Chiffre d'affaires — 12 derniers mois</h3>
+          <Section title="Chiffre d'affaires — 12 derniers mois">
             <div className="h-72">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={months}>
@@ -159,14 +169,13 @@ export default function Dashboard() {
                 </BarChart>
               </ResponsiveContainer>
             </div>
-          </Card>
+          </Section>
         </TabsContent>
 
         <TabsContent value="top">
-          <Card className="gradient-card border-border p-5">
-            <h3 className="mb-4 font-display text-lg font-semibold">Top 5 produits (CA)</h3>
+          <Section title="Top 5 produits (CA)">
             {topProducts.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Aucune donnée.</p>
+              <EmptyState density="inline" title="Aucune donnée." />
             ) : (
               <div className="space-y-3">
                 {topProducts.map((p, i) => {
@@ -190,35 +199,46 @@ export default function Dashboard() {
                 })}
               </div>
             )}
-          </Card>
+          </Section>
         </TabsContent>
       </Tabs>
 
-      <Card className="gradient-card border-border p-5">
-        <h3 className="mb-4 font-display text-lg font-semibold">Activité récente</h3>
-        <div className="divide-y divide-border">
-          {recent.length === 0 && <p className="text-sm text-muted-foreground">Aucune vente pour le moment.</p>}
-          {recent.map((s) => {
-            const store = stores.find((x) => x.id === s.storeId);
-            return (
-              <div key={s.id} className="flex items-center justify-between py-3">
-                <div>
-                  <p className="text-sm font-medium">
-                    {s.refundedFrom ? "↩️ Remboursement " : "Vente "}#{String(s.seq).padStart(6, "0")} — {s.userName}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {store?.name} · {new Date(s.date).toLocaleString("fr-FR")}
-                  </p>
+      <Section title="Activité récente">
+        {recent.length === 0 ? (
+          <EmptyState density="inline" title="Aucune vente pour le moment." />
+        ) : (
+          <div className="divide-y divide-border">
+            {recent.map((s) => {
+              const store = stores.find((x) => x.id === s.storeId);
+              return (
+                <div key={s.id} className="flex items-center justify-between py-3">
+                  <div>
+                    <p className="text-sm font-medium">
+                      {s.refundedFrom ? (
+                        <>
+                          <Undo2
+                            aria-hidden="true"
+                            className="mr-1 inline-block h-3.5 w-3.5 -translate-y-px align-middle text-destructive"
+                          />
+                          Remboursement{" "}
+                        </>
+                      ) : "Vente "}
+                      #{String(s.seq).padStart(6, "0")} — {s.userName}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {store?.name} · {new Date(s.date).toLocaleString("fr-FR")}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <Badge variant="secondary">{s.items.reduce((a, i) => a + i.quantity, 0)} art.</Badge>
+                    <span className={`font-mono font-semibold ${s.total < 0 ? "text-destructive" : "text-primary"}`}>{fmt(s.total)}</span>
+                  </div>
                 </div>
-                <div className="flex items-center gap-3">
-                  <Badge variant="secondary">{s.items.reduce((a, i) => a + i.quantity, 0)} art.</Badge>
-                  <span className={`font-mono font-semibold ${s.total < 0 ? "text-destructive" : "text-primary"}`}>{fmt(s.total)}</span>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </Card>
+              );
+            })}
+          </div>
+        )}
+      </Section>
     </div>
   );
 }

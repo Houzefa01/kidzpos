@@ -1,8 +1,6 @@
 import { useState } from "react";
 import { useAuth, Role } from "@/store/auth";
 import { useData } from "@/store/data";
-import { Card } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
@@ -11,8 +9,9 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogT
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { Plus, ShieldCheck, UserCog, KeyRound, Pencil, Trash2 } from "lucide-react";
+import { Plus, ShieldCheck, UserCog, KeyRound, Pencil, Trash2, Lock } from "lucide-react";
 import { toast } from "sonner";
+import { Button, IconButton, PageHeader, Section, EmptyState } from "@/components/ds";
 
 interface UserForm {
   name: string;
@@ -35,7 +34,13 @@ export default function Users() {
   });
 
   if (current?.role !== "ADMIN") {
-    return <div className="p-8 text-center text-sm text-muted-foreground">Accès réservé aux administrateurs.</div>;
+    return (
+      <EmptyState
+        icon={Lock}
+        title="Accès réservé"
+        description="La gestion des utilisateurs est limitée aux administrateurs."
+      />
+    );
   }
 
   const reset = () => {
@@ -107,60 +112,63 @@ export default function Users() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="font-display text-3xl font-bold">Utilisateurs</h1>
-          <p className="text-sm text-muted-foreground">Gestion des comptes admin et caissiers — admin uniquement.</p>
-        </div>
-        <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) reset(); }}>
-          <DialogTrigger asChild>
-            <Button className="gradient-primary text-primary-foreground hover:opacity-90" onClick={openCreate}>
-              <Plus className="mr-2 h-4 w-4" /> Nouvel utilisateur
-            </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader><DialogTitle>{editingId ? "Modifier" : "Créer"} un utilisateur</DialogTitle></DialogHeader>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="col-span-2 space-y-2">
-                <Label>Nom complet</Label>
-                <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-              </div>
-              <div className="space-y-2">
-                <Label>Email</Label>
-                <Input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
-              </div>
-              <div className="space-y-2">
-                <Label>Mot de passe {editingId && <span className="text-xs text-muted-foreground">(laisser vide = inchangé)</span>}</Label>
-                <Input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
-              </div>
-              <div className="space-y-2">
-                <Label>Rôle</Label>
-                <Select value={form.role} onValueChange={(v: Role) => setForm({ ...form, role: v })}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="ADMIN">Administrateur</SelectItem>
-                    <SelectItem value="EMPLOYEE">Caissier</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              {form.role === "EMPLOYEE" && (
+      <PageHeader
+        eyebrow="Équipe"
+        title="Utilisateurs"
+        subtitle="Gestion des comptes admin et caissiers — admin uniquement."
+        actions={
+          <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) reset(); }}>
+            <DialogTrigger asChild>
+              <Button variant="gradient" onClick={openCreate}>
+                <Plus className="mr-2 h-4 w-4" /> Nouvel utilisateur
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader><DialogTitle>{editingId ? "Modifier" : "Créer"} un utilisateur</DialogTitle></DialogHeader>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="col-span-2 space-y-2">
+                  <Label htmlFor="user-name">Nom complet</Label>
+                  <Input id="user-name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+                </div>
                 <div className="space-y-2">
-                  <Label>Magasin</Label>
-                  <Select value={form.storeId} onValueChange={(v) => setForm({ ...form, storeId: v })}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>{stores.map((s) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
+                  <Label htmlFor="user-email">Email</Label>
+                  <Input id="user-email" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="user-password">
+                    Mot de passe {editingId && <span className="text-xs text-muted-foreground">(laisser vide = inchangé)</span>}
+                  </Label>
+                  <Input id="user-password" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="user-role">Rôle</Label>
+                  <Select value={form.role} onValueChange={(v: Role) => setForm({ ...form, role: v })}>
+                    <SelectTrigger id="user-role"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="ADMIN">Administrateur</SelectItem>
+                      <SelectItem value="EMPLOYEE">Caissier</SelectItem>
+                    </SelectContent>
                   </Select>
                 </div>
-              )}
-            </div>
-            <DialogFooter>
-              <Button className="gradient-primary text-primary-foreground" onClick={submit}>{editingId ? "Mettre à jour" : "Créer"}</Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      </div>
+                {form.role === "EMPLOYEE" && (
+                  <div className="space-y-2">
+                    <Label htmlFor="user-store">Magasin</Label>
+                    <Select value={form.storeId} onValueChange={(v) => setForm({ ...form, storeId: v })}>
+                      <SelectTrigger id="user-store"><SelectValue /></SelectTrigger>
+                      <SelectContent>{stores.map((s) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
+                    </Select>
+                  </div>
+                )}
+              </div>
+              <DialogFooter>
+                <Button variant="gradient" onClick={submit}>{editingId ? "Mettre à jour" : "Créer"}</Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        }
+      />
 
-      <Card className="gradient-card border-border">
+      <Section padding="none">
         <Table>
           <TableHeader>
             <TableRow>
@@ -176,7 +184,7 @@ export default function Users() {
           <TableBody>
             {users.length === 0 && (
               <TableRow>
-                <TableCell colSpan={6} className="text-center text-sm text-muted-foreground py-8">
+                <TableCell colSpan={7} className="text-center text-sm text-muted-foreground py-8">
                   Aucun utilisateur. Cliquez sur « Nouvel utilisateur » pour commencer.
                 </TableCell>
               </TableRow>
@@ -199,18 +207,38 @@ export default function Users() {
                   </TableCell>
                   <TableCell className="text-xs">{store ? store.name.split("—")[0] : "—"}</TableCell>
                   <TableCell className="text-right">
-                    <Button size="sm" variant="ghost" onClick={() => setPwdUser({ id: u.id, email: u.email, name: u.name })}>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setPwdUser({ id: u.id, email: u.email, name: u.name })}
+                      aria-label={`Changer le mot de passe de ${u.name}`}
+                    >
                       <KeyRound className="mr-1 h-3 w-3" /> Changer
                     </Button>
                   </TableCell>
                   <TableCell className="text-right">
-                    <Switch checked={u.active} onCheckedChange={() => onToggle(u.id)} />
+                    <Switch
+                      checked={u.active}
+                      onCheckedChange={() => onToggle(u.id)}
+                      aria-label={`${u.active ? "Désactiver" : "Activer"} ${u.name}`}
+                    />
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-1">
-                      <Button size="icon" variant="ghost" onClick={() => openEdit(u.id)}><Pencil className="h-4 w-4" /></Button>
+                      <IconButton
+                        icon={Pencil}
+                        onClick={() => openEdit(u.id)}
+                        aria-label={`Modifier ${u.name}`}
+                      />
                       <ConfirmDialog
-                        trigger={<Button size="icon" variant="ghost" disabled={u.id === current.id}><Trash2 className="h-4 w-4 text-destructive" /></Button>}
+                        trigger={
+                          <IconButton
+                            icon={Trash2}
+                            tone="destructive"
+                            disabled={u.id === current.id}
+                            aria-label={`Supprimer ${u.name}`}
+                          />
+                        }
                         title={`Supprimer ${u.name} ?`}
                         description="Cette action est irréversible. Le compte ne pourra plus se connecter."
                         destructive
@@ -223,7 +251,7 @@ export default function Users() {
             })}
           </TableBody>
         </Table>
-      </Card>
+      </Section>
 
       <Dialog open={!!pwdUser} onOpenChange={(v) => { if (!v) { setPwdUser(null); setNewPwd(""); } }}>
         <DialogContent>
@@ -231,11 +259,19 @@ export default function Users() {
           {pwdUser && (
             <div className="space-y-3">
               <p className="text-sm text-muted-foreground">Pour <span className="font-medium text-foreground">{pwdUser.name}</span></p>
-              <Input type="text" placeholder="Nouveau mot de passe" value={newPwd} onChange={(e) => setNewPwd(e.target.value)} autoFocus />
+              <Input
+                id="new-pwd"
+                type="text"
+                placeholder="Nouveau mot de passe"
+                aria-label={`Nouveau mot de passe pour ${pwdUser.name}`}
+                value={newPwd}
+                onChange={(e) => setNewPwd(e.target.value)}
+                autoFocus
+              />
             </div>
           )}
           <DialogFooter>
-            <Button className="gradient-primary text-primary-foreground" onClick={submitPwd} disabled={isSubmittingPwd || newPwd.length < 4}>
+            <Button variant="gradient" onClick={submitPwd} disabled={isSubmittingPwd || newPwd.length < 4}>
               {isSubmittingPwd ? "Mise à jour…" : "Mettre à jour"}
             </Button>
           </DialogFooter>

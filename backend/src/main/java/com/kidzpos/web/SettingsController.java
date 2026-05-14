@@ -21,7 +21,6 @@ public class SettingsController {
     @Transactional
     public Settings update(@Valid @RequestBody SettingsReq r) {
         var s = repo.findById(1L).orElseThrow();
-        s.setTaxRate(r.taxRate());
         s.setMaxDiscountPercent(r.maxDiscountPercent());
         s.setPointsPerAr(r.pointsPerAr());
         s.setArPerPoint(r.arPerPoint());

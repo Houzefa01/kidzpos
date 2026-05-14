@@ -5,7 +5,6 @@ import { pushMutation } from "@/store/backend";
 export type Currency = "AR" | "EUR";
 
 export interface Settings {
-  taxRate: number; // %
   maxDiscountPercent: number;
   /** Points gagnés par Ariary dépensé. Ex: 0.0002 → 1 point par 5000 Ar. */
   pointsPerAr: number;
@@ -22,7 +21,6 @@ interface SettingsState {
 }
 
 const DEFAULTS: Settings = {
-  taxRate: 20,
   maxDiscountPercent: 10,
   // 5000 Ar dépensés → 1 point ; 1 point = 100 Ar (∼2% de retour).
   pointsPerAr: 0.0002,

@@ -50,8 +50,6 @@ export interface Sale {
   userName: string;
   items: SaleItem[];
   subtotal: number;
-  tax: number;
-  taxRate: number;
   discount: number;
   total: number;
   date: string;
@@ -225,7 +223,6 @@ export const useData = create<DataState>()(
           date: new Date().toISOString(),
           items: original.items.map((i) => ({ ...i })),
           subtotal: -original.subtotal,
-          tax: -original.tax,
           discount: -original.discount,
           total: -original.total,
           pointsEarned: -original.pointsEarned,
@@ -403,7 +400,6 @@ export const useData = create<DataState>()(
           }));
           state.sales = ((state.sales ?? []) as Record<string, unknown>[]).map((s) => ({
             ...s,
-            taxRate: (s.taxRate as number) ?? 20,
             pointsEarned: (s.pointsEarned as number) ?? 0,
             pointsRedeemed: (s.pointsRedeemed as number) ?? 0,
             paymentMode: (s.paymentMode as string) ?? "CASH",

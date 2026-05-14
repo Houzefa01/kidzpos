@@ -2,23 +2,23 @@ import { useMemo, useRef, useState } from "react";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { useHotkeys } from "@/hooks/useHotkeys";
 import { useAuth } from "@/store/auth";
-import { useData, Product, SaleItem, Sale, PaymentMode, paymentLabel } from "@/store/data";
+import { useData, Product, SaleItem, Sale, PaymentMode } from "@/store/data";
 import { useSettings } from "@/store/settings";
 import { useExchange } from "@/store/exchange";
 import { useCustomers, Customer } from "@/store/customers";
-import { Card } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CategoryCombobox } from "@/components/CategoryCombobox";
 import { CustomerPicker } from "@/components/CustomerPicker";
-import { Plus, Minus, Trash2, Receipt as ReceiptIcon, Banknote, Printer, Star, Keyboard, ScanLine, Pause, Play, FileText } from "lucide-react";
+import {
+  Plus, Minus, Trash2, Banknote, Star, Keyboard, ScanLine,
+  Pause, Play, CreditCard, Smartphone, Shuffle, Wallet, ShoppingCart, X,
+} from "lucide-react";
 import { toast } from "sonner";
-import { downloadReceiptPdf } from "@/lib/pdf";
 import { useFormatMoney, parseMoneyToAr, currencySymbol } from "@/lib/money";
+import { Button, CategoryIcon, PageHeader, SearchInput, FilterSelect, KbdHint, ReceiptOverlay } from "@/components/ds";
 
 export default function POS() {
   const { user } = useAuth();
@@ -39,13 +39,11 @@ export default function POS() {
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [redeemPoints, setRedeemPoints] = useState(0);
   const [paymentMode, setPaymentMode] = useState<PaymentMode>("CASH");
-  // Montant saisi par le caissier, dans la devise affichée (`saleCurrency`).
-  // Converti en EUR via parseMoneyToEur avant tout calcul/stockage.
   const [amountPaidInput, setAmountPaidInput] = useState<number>(0);
-  // Devise affichée au client pour CETTE vente. Default = devise globale.
   const [saleCurrency, setSaleCurrency] = useState<"AR" | "EUR">(settings.currency);
   const [quickOpen, setQuickOpen] = useState(false);
   const [showHotkeys, setShowHotkeys] = useState(false);
+  const [cartOpen, setCartOpen] = useState(false);
 
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -107,28 +105,19 @@ export default function POS() {
     );
   };
 
-  // Calculs
+  // ── Computations ──
   const subtotal = +cart.reduce((a, i) => a + i.price * i.quantity, 0).toFixed(2);
-
-  // Plafond remise selon rôle
   const maxDiscount = isAdmin ? 100 : settings.maxDiscountPercent;
   const safeDiscount = Math.max(0, Math.min(maxDiscount, discount));
-
   const discountAmt = +(subtotal * (safeDiscount / 100)).toFixed(2);
-
-  // Points utilisés
   const maxRedeemable = customer ? customer.points : 0;
   const usedPoints = Math.max(0, Math.min(maxRedeemable, redeemPoints));
   const pointsValue = +(usedPoints * settings.arPerPoint).toFixed(2);
-
-  const taxableBase = Math.max(0, subtotal - discountAmt - pointsValue);
-  const tax = +(taxableBase * (settings.taxRate / 100)).toFixed(2);
-  const total = +(taxableBase + tax).toFixed(2);
-  // Le caissier saisit dans la devise affichée — on convertit en AR (canonique)
-  // pour comparer au total. Si saleCurrency=EUR, on multiplie par le taux ; sinon
-  // passthrough. Évite l'interprétation incorrecte de la saisie.
+  const total = +Math.max(0, subtotal - discountAmt - pointsValue).toFixed(2);
   const amountPaidAr = parseMoneyToAr(amountPaidInput, saleCurrency, rate);
   const change = paymentMode === "CASH" && amountPaidAr > 0 ? +(amountPaidAr - total).toFixed(2) : 0;
+
+  const cartCount = cart.reduce((a, i) => a + i.quantity, 0);
 
   const checkout = () => {
     if (!user) { toast.error("Session expirée"); return; }
@@ -144,8 +133,6 @@ export default function POS() {
       userName: user.name,
       items: cart,
       subtotal,
-      tax,
-      taxRate: settings.taxRate,
       discount: discountAmt,
       total,
       customerId: customer?.id,
@@ -153,7 +140,6 @@ export default function POS() {
       pointsEarned,
       pointsRedeemed: usedPoints,
       paymentMode,
-      // Non-CASH = paiement exact (carte/mobile money/mixte) → amountPaid = total.
       amountPaid: paymentMode === "CASH" ? amountPaidAr : total,
       change,
       currency: saleCurrency,
@@ -166,17 +152,16 @@ export default function POS() {
     setRedeemPoints(0);
     setPaymentMode("CASH");
     setAmountPaidInput(0);
+    setCartOpen(false);
     toast.success("Vente validée");
   };
 
-  // Raccourcis clavier
   useHotkeys({
     f2: (e) => { e.preventDefault(); searchRef.current?.focus(); searchRef.current?.select(); },
     f9: (e) => { e.preventDefault(); checkout(); },
     escape: () => { setSearch(""); },
   });
 
-  // Si SKU exact + Enter dans le champ recherche → ajout direct
   const onSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") {
       const q = search.trim().toLowerCase();
@@ -193,234 +178,445 @@ export default function POS() {
   };
 
   return (
-    <div className="grid h-[calc(100vh-7rem)] grid-cols-1 gap-4 md:grid-cols-[1fr_380px]">
-      {/* Products grid */}
-      <div className="flex flex-col space-y-4 overflow-hidden">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-          <div className="relative flex-1">
-            <ScanLine className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-primary" />
-            <Input
+    <div className="pb-24 md:flex md:h-[calc(100vh-7rem)] md:flex-col md:gap-4 md:pb-0">
+      {/* ═══ STOCK : zone compressée sur desktop (shrink-0 + grid plus haut → moins de colonnes verticales)
+           Le caissier scanne / cherche en priorité — la grille est un fallback visuel. */}
+      <section className="flex flex-col gap-4 md:shrink-0 md:gap-5">
+        <PageHeader
+          eyebrow="Caisse"
+          title="Encaissement"
+          actions={
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowHotkeys(true)}
+              className="h-9 rounded-md text-muted-foreground hover:text-foreground"
+              title="Raccourcis"
+              aria-label="Afficher les raccourcis clavier"
+            >
+              <Keyboard className="mr-2 h-4 w-4" aria-hidden="true" />
+              <span className="hidden sm:inline">Raccourcis</span>
+            </Button>
+          }
+        />
+
+        {/* Search + actions bar */}
+        <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:flex-wrap">
+          {/* Search input + dropdown résultats live (visible uniquement pendant la recherche) */}
+          <div className="relative min-w-0 flex-1">
+            <SearchInput
               ref={searchRef}
+              icon={ScanLine}
+              kbdHint="F2"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               onKeyDown={onSearchKeyDown}
-              placeholder="Rechercher / scanner code-barres ou SKU... (F2)"
-              className="h-11 pl-9 text-base"
+              placeholder="Rechercher / scanner code-barres ou SKU"
+              aria-label="Rechercher / scanner un produit"
               autoFocus
+              className="h-10 rounded-lg border-border bg-card pl-10 text-sm focus-visible:ring-2 focus-visible:ring-primary/30"
             />
+            {debouncedSearch.trim() && (
+              <div
+                role="listbox"
+                aria-label="Résultats de recherche"
+                className="absolute inset-x-0 top-full z-30 mt-1 max-h-80 overflow-y-auto rounded-lg border border-border bg-card shadow-elevated"
+              >
+                {filtered.length === 0 ? (
+                  <p className="p-4 text-center text-sm text-muted-foreground">
+                    Aucun produit ne correspond à « {debouncedSearch.trim()} ».
+                  </p>
+                ) : (
+                  <ul>
+                    {filtered.map((p) => {
+                      const low = p.stock <= 3;
+                      return (
+                        <li key={p.id}>
+                          <button
+                            type="button"
+                            role="option"
+                            aria-selected="false"
+                            onClick={() => { addToCart(p); setSearch(""); searchRef.current?.focus(); }}
+                            className="flex w-full items-center justify-between gap-3 border-b border-border px-4 py-3 text-left transition last:border-b-0 hover:bg-secondary focus-visible:bg-secondary focus-visible:outline-none"
+                          >
+                            <div className="flex min-w-0 items-center gap-3">
+                              <CategoryIcon category={p.category} />
+                              <div className="min-w-0">
+                                <p className="truncate text-sm font-medium">{p.name}</p>
+                                <p className="mt-0.5 truncate font-mono text-2xs uppercase tracking-eyebrow text-muted-foreground">
+                                  {p.sku}{p.category ? ` · ${p.category}` : ""}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex shrink-0 items-center gap-2">
+                              <span className="font-mono text-sm font-semibold tabular-nums">
+                                {fmt(p.price, saleCurrency)}
+                              </span>
+                              <span className={`rounded px-1.5 py-0.5 font-mono text-2xs font-medium ${low ? "bg-warning/15 text-warning-foreground" : "bg-secondary text-muted-foreground"}`}>
+                                ×{p.stock}
+                              </span>
+                            </div>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+            )}
           </div>
           {isAdmin && (
-            <Select value={activeStore} onValueChange={setActiveStore}>
-              <SelectTrigger className="sm:w-56"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {stores.map((s) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
+            <FilterSelect
+              value={activeStore}
+              onValueChange={setActiveStore}
+              options={stores.map((s) => ({ value: s.id, label: s.name }))}
+              allLabel={null}
+              aria-label="Magasin actif"
+              triggerClassName="h-10 rounded-lg border-border bg-card sm:w-48"
+            />
           )}
           {isAdmin && (
-            <Button variant="outline" onClick={() => setQuickOpen(true)} title="Nouveau produit rapide">
-              <Plus className="mr-1 h-4 w-4" /> Produit
+            <Button
+              variant="outline"
+              onClick={() => setQuickOpen(true)}
+              className="h-10 rounded-lg border-border bg-card hover:bg-secondary"
+              title="Nouveau produit rapide"
+              aria-label="Créer un nouveau produit rapidement"
+            >
+              <Plus className="mr-1.5 h-4 w-4" aria-hidden="true" /> Produit
             </Button>
           )}
-          <Button variant="outline" onClick={() => {
-            if (cart.length === 0) { toast.error("Panier vide"); return; }
-            parkCart({ storeId, userId: user!.id, items: cart, customerId: customer?.id, customerName: customer?.name, label: `${cart.length} art.` });
-            setCart([]); setCustomer(null);
-            toast.success("Panier mis en attente");
-          }} title="Mettre en attente">
-            <Pause className="mr-1 h-4 w-4" /> Park
+          <Button
+            variant="outline"
+            onClick={() => {
+              if (cart.length === 0) { toast.error("Panier vide"); return; }
+              parkCart({ storeId, userId: user!.id, items: cart, customerId: customer?.id, customerName: customer?.name, label: `${cart.length} art.` });
+              setCart([]); setCustomer(null);
+              toast.success("Panier mis en attente");
+            }}
+            className="h-10 rounded-lg border-border bg-card hover:bg-secondary"
+            title="Mettre en attente"
+            aria-label="Mettre le panier en attente"
+          >
+            <Pause className="mr-1.5 h-4 w-4" aria-hidden="true" /> Park
           </Button>
           {parked.length > 0 && (
-            <Select onValueChange={(id) => {
-              const c = unparkCart(id);
-              if (c) { setCart(c.items); toast.success("Panier repris"); }
-            }}>
-              <SelectTrigger className="w-32"><Play className="mr-1 h-3 w-3" /><SelectValue placeholder={`${parked.length} en attente`} /></SelectTrigger>
-              <SelectContent>{parked.map((p) => <SelectItem key={p.id} value={p.id}>{p.label} — {new Date(p.createdAt).toLocaleTimeString("fr-FR")}</SelectItem>)}</SelectContent>
-            </Select>
-          )}
-          <Button variant="ghost" size="icon" onClick={() => setShowHotkeys(true)} title="Raccourcis">
-            <Keyboard className="h-4 w-4" />
-          </Button>
-        </div>
-
-        <div className="grid flex-1 grid-cols-2 gap-3 overflow-y-auto pr-1 sm:grid-cols-3 xl:grid-cols-4">
-          {filtered.map((p) => (
-            <button
-              key={p.id}
-              onClick={() => addToCart(p)}
-              className="gradient-card group flex flex-col rounded-xl border border-border p-3 text-left transition hover:-translate-y-0.5 hover:border-primary hover:shadow-glow"
-            >
-              <div className="mb-2 flex aspect-square items-center justify-center rounded-lg bg-secondary text-3xl">
-                {emojiFor(p.category)}
-              </div>
-              <p className="line-clamp-2 text-sm font-medium">{p.name}</p>
-              <p className="mt-1 font-mono text-xs text-muted-foreground">{p.sku}</p>
-              <div className="mt-2 flex items-center justify-between">
-                <span className="font-mono text-base font-bold text-primary">{fmt(p.price, saleCurrency)}</span>
-                <Badge variant="outline" className="text-[10px]">×{p.stock}</Badge>
-              </div>
-            </button>
-          ))}
-          {filtered.length === 0 && (
-            <p className="col-span-full py-12 text-center text-sm text-muted-foreground">Aucun produit disponible.</p>
-          )}
-        </div>
-      </div>
-
-      {/* Cart */}
-      <Card className="gradient-card flex flex-col border-border p-4">
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="font-display text-lg font-bold">Panier</h2>
-          <Badge variant="secondary">{cart.reduce((a, i) => a + i.quantity, 0)} articles</Badge>
-        </div>
-
-        <div className="mb-3">
-          <CustomerPicker value={customer} onChange={(c) => { setCustomer(c); setRedeemPoints(0); }} />
-        </div>
-
-        <div className="flex-1 space-y-2 overflow-y-auto pr-1">
-          {cart.length === 0 && (
-            <p className="py-12 text-center text-sm text-muted-foreground">Sélectionnez des produits…</p>
-          )}
-          {cart.map((i) => (
-            <div key={i.productId} className="rounded-lg border border-border bg-secondary/40 p-3">
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium">{i.name}</p>
-                  <p className="font-mono text-xs text-muted-foreground">{fmt(i.price, saleCurrency)} / pc</p>
-                </div>
-                <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setCart((c) => c.filter((x) => x.productId !== i.productId))}>
-                  <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                </Button>
-              </div>
-              <div className="mt-2 flex items-center justify-between">
-                <div className="flex items-center gap-1">
-                  <Button size="icon" variant="outline" className="h-7 w-7" onClick={() => updateQty(i.productId, -1)}>
-                    <Minus className="h-3 w-3" />
-                  </Button>
-                  <span className="w-8 text-center font-mono">{i.quantity}</span>
-                  <Button size="icon" variant="outline" className="h-7 w-7" onClick={() => updateQty(i.productId, 1)}>
-                    <Plus className="h-3 w-3" />
-                  </Button>
-                </div>
-                <span className="font-mono font-semibold">{fmt(i.quantity * i.price, saleCurrency)}</span>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <div className="mt-3 space-y-2 border-t border-border pt-3">
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">Sous-total</span>
-            <span className="font-mono">{fmt(subtotal, saleCurrency)}</span>
-          </div>
-
-          <div className="flex items-center justify-between text-sm">
-            <label className="text-muted-foreground" htmlFor="discount">
-              Remise % {!isAdmin && <span className="text-[10px]">(max {settings.maxDiscountPercent}%)</span>}
-            </label>
-            <Input
-              id="discount" type="number" min={0} max={maxDiscount}
-              value={discount}
-              onChange={(e) => {
-                const v = +e.target.value || 0;
-                if (!isAdmin && v > settings.maxDiscountPercent) {
-                  toast.error(`Remise plafonnée à ${settings.maxDiscountPercent}%`);
-                }
-                setDiscount(Math.max(0, Math.min(maxDiscount, v)));
+            <Select
+              onValueChange={(id) => {
+                const c = unparkCart(id);
+                if (c) { setCart(c.items); toast.success("Panier repris"); }
               }}
-              className="h-7 w-20 text-right font-mono"
-            />
-          </div>
-
-          {customer && customer.points > 0 && (
-            <div className="flex items-center justify-between rounded bg-warning/10 px-2 py-1.5 text-sm">
-              <label className="flex items-center gap-1 text-warning" htmlFor="points">
-                <Star className="h-3 w-3" /> Utiliser pts (max {customer.points})
-              </label>
-              <Input
-                id="points" type="number" min={0} max={maxRedeemable}
-                value={redeemPoints}
-                onChange={(e) => setRedeemPoints(Math.max(0, Math.min(maxRedeemable, +e.target.value || 0)))}
-                className="h-7 w-20 text-right font-mono"
-              />
-            </div>
-          )}
-          {usedPoints > 0 && (
-            <div className="flex items-center justify-between text-xs text-warning">
-              <span>− Réduction fidélité</span>
-              <span className="font-mono">−{fmt(pointsValue, saleCurrency)}</span>
-            </div>
-          )}
-
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">TVA ({settings.taxRate}%)</span>
-            <span className="font-mono">{fmt(tax, saleCurrency)}</span>
-          </div>
-
-          <div className="flex items-center justify-between gap-2 text-sm">
-            <span className="text-muted-foreground">Paiement</span>
-            <Select value={paymentMode} onValueChange={(v: PaymentMode) => setPaymentMode(v)}>
-              <SelectTrigger className="h-7 w-36"><SelectValue /></SelectTrigger>
+            >
+              <SelectTrigger
+                className="h-10 w-36 rounded-lg border-border bg-card"
+                aria-label={`Reprendre un panier en attente (${parked.length})`}
+              >
+                <Play className="mr-1 h-3 w-3" aria-hidden="true" />
+                <SelectValue placeholder={`${parked.length} en attente`} />
+              </SelectTrigger>
               <SelectContent>
-                <SelectItem value="CASH">Espèces</SelectItem>
-                <SelectItem value="CARD">Carte</SelectItem>
-                <SelectItem value="MOBILE_MONEY">Mobile Money</SelectItem>
-                <SelectItem value="MIXED">Mixte</SelectItem>
+                {parked.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.label} — {new Date(p.createdAt).toLocaleTimeString("fr-FR")}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
-          </div>
+          )}
+        </div>
 
-          <div className="flex items-center justify-between gap-2 text-sm">
-            <span className="text-muted-foreground">Devise affichée</span>
-            <Select value={saleCurrency} onValueChange={(v: "AR" | "EUR") => setSaleCurrency(v)}>
-              <SelectTrigger className="h-7 w-32"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="AR">Ariary (Ar)</SelectItem>
-                <SelectItem value="EUR">Euro (€)</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+      </section>
 
-          {paymentMode === "CASH" && (
-            <div className="space-y-1">
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">Reçu ({currencySymbol(saleCurrency)})</span>
-                <Input
-                  type="number"
-                  step={saleCurrency === "AR" ? "1" : "0.01"}
-                  min={0}
-                  value={amountPaidInput || ""}
-                  onChange={(e) => setAmountPaidInput(+e.target.value || 0)}
-                  placeholder={saleCurrency === "AR" ? "0" : "0.00"}
-                  className="h-7 w-28 text-right font-mono"
-                />
+      {/* Mobile backdrop when cart sheet is open */}
+      {cartOpen && (
+        <div
+          onClick={() => setCartOpen(false)}
+          aria-hidden="true"
+          className="fixed inset-0 z-40 bg-foreground/40 backdrop-blur-sm md:hidden"
+        />
+      )}
+
+      {/* ═══ Cart panel — 2 colonnes sur desktop, sheet 1 col empilée sur mobile
+          DESKTOP (md+) : `md:flex-row md:flex-1`
+            ├ COLUMN 1 (md:flex-1)  : panier articles + calculs scrollables
+            └ COLUMN 2 (md:w-96)    : paiement / devise / reçu — puis TOTAL + Encaisser pinned bas
+          MOBILE  : `flex-col` (fixed bottom sheet), COLUMN 1 au-dessus de COLUMN 2.
+          La structure 2-col rend les articles immédiatement visibles à gauche,
+          le caissier voit le panier en un coup d'œil — pas besoin de scroller.
+       */}
+      <aside
+        aria-label="Panier"
+        className={`fixed inset-x-0 bottom-0 z-50 flex max-h-[92dvh] flex-col overflow-hidden rounded-t-2xl border-t border-border bg-card shadow-elevated transition-transform duration-300 md:relative md:z-auto md:max-h-full md:min-h-0 md:flex-1 md:flex-row md:rounded-xl md:border md:shadow-card md:transition-none ${
+          cartOpen ? "translate-y-0" : "translate-y-full md:translate-y-0"
+        }`}
+      >
+        {/* Mobile-only close button + drag handle */}
+        <div className="flex shrink-0 items-center justify-center py-2 md:hidden" aria-hidden="true">
+          <span className="h-1 w-10 rounded-full bg-border" />
+        </div>
+        <button
+          type="button"
+          onClick={() => setCartOpen(false)}
+          aria-label="Fermer le panier"
+          className="absolute right-3 top-3 z-10 grid h-8 w-8 place-items-center rounded-full text-muted-foreground transition hover:bg-secondary hover:text-foreground md:hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <X className="h-4 w-4" aria-hidden="true" />
+        </button>
+
+        {/* ═══ COLUMN 1 : articles + calculs (gauche desktop, haut mobile) ═══ */}
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          {/* HEADER : titre + customer */}
+          <div className="shrink-0">
+            <div className="flex items-center justify-between border-b border-border px-5 py-3.5">
+              <div className="flex items-baseline gap-2.5">
+                <h2 className="text-base font-semibold tracking-display">Panier</h2>
+                <span className="font-mono text-xs text-muted-foreground" aria-label={`${cartCount} articles`}>
+                  {cartCount} art.
+                </span>
               </div>
-              {change > 0 && (
-                <div className="flex items-center justify-between text-sm font-semibold text-success">
-                  <span>Rendu monnaie</span>
-                  <span className="font-mono">{fmt(change, saleCurrency)}</span>
+              <span className="h-1.5 w-1.5 rounded-full bg-primary" aria-hidden="true" />
+            </div>
+            <div className="border-b border-border px-5 py-3">
+              <CustomerPicker value={customer} onChange={(c) => { setCustomer(c); setRedeemPoints(0); }} />
+            </div>
+          </div>
+
+          {/* BODY scrollable : articles + calculs intermédiaires */}
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <div className="space-y-1.5 px-5 py-3">
+              {cart.length === 0 && (
+                <div className="flex flex-col items-center justify-center py-12 text-center" role="status">
+                  <p className="text-sm text-muted-foreground">
+                    Sélectionnez des produits…
+                  </p>
                 </div>
               )}
+              {cart.map((i) => (
+                <div
+                  key={i.productId}
+                  className="group rounded-lg border border-border bg-card p-3 transition hover:border-foreground/15"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium leading-snug">{i.name}</p>
+                      <p className="mt-0.5 font-mono text-2xs text-muted-foreground">
+                        {fmt(i.price, saleCurrency)} · l'unité
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setCart((c) => c.filter((x) => x.productId !== i.productId))}
+                      aria-label={`Retirer ${i.name} du panier`}
+                      className="grid h-8 w-8 place-items-center rounded-md text-muted-foreground/60 transition hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      title="Retirer"
+                    >
+                      <Trash2 className="h-4 w-4" aria-hidden="true" />
+                    </button>
+                  </div>
+                  <div className="mt-2 flex items-center justify-between">
+                    <div className="inline-flex items-center rounded-md border border-border bg-secondary p-0.5">
+                      <button
+                        type="button"
+                        onClick={() => updateQty(i.productId, -1)}
+                        aria-label={`Diminuer la quantité de ${i.name}`}
+                        className="grid h-8 w-8 place-items-center rounded-sm text-muted-foreground transition hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      >
+                        <Minus className="h-3.5 w-3.5" aria-hidden="true" />
+                      </button>
+                      <span className="w-8 text-center font-mono text-xs font-semibold" aria-live="polite">{i.quantity}</span>
+                      <button
+                        type="button"
+                        onClick={() => updateQty(i.productId, 1)}
+                        aria-label={`Augmenter la quantité de ${i.name}`}
+                        className="grid h-8 w-8 place-items-center rounded-sm text-muted-foreground transition hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      >
+                        <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+                      </button>
+                    </div>
+                    <span className="font-mono text-sm font-semibold tracking-display">
+                      {fmt(i.quantity * i.price, saleCurrency)}
+                    </span>
+                  </div>
+                </div>
+              ))}
             </div>
-          )}
-
-          <div className="flex items-center justify-between border-t border-border pt-2">
-            <span className="font-display text-lg font-bold">Total</span>
-            <span className="font-mono text-2xl font-bold text-primary">{fmt(total, saleCurrency)}</span>
           </div>
-          <Button
-            className="h-12 w-full gradient-primary text-base text-primary-foreground hover:opacity-90"
-            disabled={cart.length === 0}
-            onClick={checkout}
-          >
-            <Banknote className="mr-2 h-5 w-5" /> Encaisser <span className="ml-2 text-xs opacity-70">(F9)</span>
-          </Button>
         </div>
-      </Card>
 
-      {/* Quick add product */}
+        {/* ═══ COLUMN 2 : calculs + paiement + TOTAL + CTA (droite desktop, bas mobile) ═══ */}
+        <div className="flex shrink-0 flex-col border-t border-border bg-card md:w-96 md:border-l md:border-t-0">
+          {/* Contrôles paiement — scrollable si trop hauts (rare) */}
+          <div className="space-y-4 px-5 py-4 md:min-h-0 md:flex-1 md:overflow-y-auto">
+            {/* Calculs : sous-total, remise, points — visibles si panier non vide */}
+            {cart.length > 0 && (
+              <div className="space-y-2">
+                <Row label="Sous-total" value={fmt(subtotal, saleCurrency)} />
+
+                <div className="flex items-center justify-between text-sm">
+                  <label className="text-muted-foreground" htmlFor="discount">
+                    Remise % {!isAdmin && <span className="text-2xs">(max {settings.maxDiscountPercent}%)</span>}
+                  </label>
+                  <Input
+                    id="discount"
+                    type="number"
+                    min={0}
+                    max={maxDiscount}
+                    value={discount}
+                    onChange={(e) => {
+                      const v = +e.target.value || 0;
+                      if (!isAdmin && v > settings.maxDiscountPercent) {
+                        toast.error(`Remise plafonnée à ${settings.maxDiscountPercent}%`);
+                      }
+                      setDiscount(Math.max(0, Math.min(maxDiscount, v)));
+                    }}
+                    className="h-8 w-20 rounded-md border-border bg-secondary text-right font-mono text-xs"
+                  />
+                </div>
+
+                {customer && customer.points > 0 && (
+                  <div className="flex items-center justify-between rounded-md bg-warning/10 px-3 py-1.5 text-sm">
+                    <label className="flex items-center gap-1.5 text-warning-foreground/85" htmlFor="points">
+                      <Star className="h-3.5 w-3.5 text-warning" aria-hidden="true" /> Points (max {customer.points})
+                    </label>
+                    <Input
+                      id="points"
+                      type="number"
+                      min={0}
+                      max={maxRedeemable}
+                      value={redeemPoints}
+                      onChange={(e) => setRedeemPoints(Math.max(0, Math.min(maxRedeemable, +e.target.value || 0)))}
+                      className="h-8 w-20 rounded-md border-warning/40 bg-background text-right font-mono text-xs"
+                    />
+                  </div>
+                )}
+                {usedPoints > 0 && (
+                  <Row label="− Réduction fidélité" value={`−${fmt(pointsValue, saleCurrency)}`} tone="warning" />
+                )}
+              </div>
+            )}
+
+            {/* Mode de paiement */}
+            <div>
+              <p className="mb-1.5 text-2xs font-medium uppercase tracking-eyebrow text-muted-foreground">
+                Paiement
+              </p>
+              <div className="grid grid-cols-4 gap-1.5" role="radiogroup" aria-label="Mode de paiement">
+                <PayChip active={paymentMode === "CASH"} onClick={() => setPaymentMode("CASH")} icon={<Wallet className="h-4 w-4" aria-hidden="true" />} label="Espèces" />
+                <PayChip active={paymentMode === "CARD"} onClick={() => setPaymentMode("CARD")} icon={<CreditCard className="h-4 w-4" aria-hidden="true" />} label="Carte" />
+                <PayChip active={paymentMode === "MOBILE_MONEY"} onClick={() => setPaymentMode("MOBILE_MONEY")} icon={<Smartphone className="h-4 w-4" aria-hidden="true" />} label="Mobile" />
+                <PayChip active={paymentMode === "MIXED"} onClick={() => setPaymentMode("MIXED")} icon={<Shuffle className="h-4 w-4" aria-hidden="true" />} label="Mixte" />
+              </div>
+            </div>
+
+            {/* Devise */}
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-muted-foreground" id="currency-label">Devise</span>
+              <div className="inline-flex rounded-md border border-border bg-secondary p-0.5 text-xs" role="group" aria-labelledby="currency-label">
+                <button
+                  type="button"
+                  onClick={() => setSaleCurrency("AR")}
+                  aria-pressed={saleCurrency === "AR"}
+                  aria-label="Devise Ariary"
+                  className={`rounded-sm px-2.5 py-1 font-mono transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                    saleCurrency === "AR" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  Ar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSaleCurrency("EUR")}
+                  aria-pressed={saleCurrency === "EUR"}
+                  aria-label="Devise Euro"
+                  className={`rounded-sm px-2.5 py-1 font-mono transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                    saleCurrency === "EUR" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  €
+                </button>
+              </div>
+            </div>
+
+            {/* Reçu (CASH) + rendu monnaie */}
+            {paymentMode === "CASH" && (
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-sm">
+                  <label className="text-muted-foreground" htmlFor="amount-paid">Reçu ({currencySymbol(saleCurrency)})</label>
+                  <Input
+                    id="amount-paid"
+                    type="number"
+                    step={saleCurrency === "AR" ? "1" : "0.01"}
+                    min={0}
+                    value={amountPaidInput || ""}
+                    onChange={(e) => setAmountPaidInput(+e.target.value || 0)}
+                    placeholder={saleCurrency === "AR" ? "0" : "0.00"}
+                    className="h-8 w-24 rounded-md border-border bg-secondary text-right font-mono text-xs"
+                  />
+                </div>
+                {change > 0 && (
+                  <div className="flex animate-fade-in items-center justify-between rounded-md bg-success/10 px-3 py-1.5 text-sm font-medium text-success" role="status">
+                    <span>Rendu monnaie</span>
+                    <span className="font-mono">{fmt(change, saleCurrency)}</span>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* TOTAL + Encaisser — toujours visibles au bas de COLUMN 2 */}
+          <div className="shrink-0 space-y-3 border-t border-border bg-card px-5 py-4">
+            <div className="flex items-baseline justify-between">
+              <span className="text-2xs font-medium uppercase tracking-eyebrow text-muted-foreground">
+                Total
+              </span>
+              <div className="flex items-baseline gap-1">
+                <span className="font-mono text-4xl font-semibold leading-none tracking-display">
+                  {fmt(total, saleCurrency, { withSymbol: false })}
+                </span>
+                <span className="text-sm font-medium text-muted-foreground">
+                  {currencySymbol(saleCurrency)}
+                </span>
+              </div>
+            </div>
+
+            <Button
+              variant="gradient"
+              disabled={cart.length === 0}
+              onClick={checkout}
+              aria-label="Encaisser la vente (F9)"
+              title="Encaisser (F9)"
+              className="h-12 w-full rounded-lg text-sm font-medium transition-transform active:scale-[0.99] disabled:opacity-50"
+            >
+              <Banknote className="mr-2 h-4 w-4" aria-hidden="true" />
+              Encaisser
+            </Button>
+          </div>
+        </div>
+      </aside>
+
+      {/* Mobile-only floating CTA — opens the cart sheet */}
+      {!cartOpen && (
+        <button
+          type="button"
+          onClick={() => setCartOpen(true)}
+          aria-label={cart.length === 0 ? "Ouvrir le panier (vide)" : `Ouvrir le panier (${cartCount} articles, ${fmt(total, saleCurrency)})`}
+          className="fixed bottom-4 right-4 z-30 flex h-12 items-center gap-3 rounded-full bg-primary px-4 pr-5 text-sm font-medium text-primary-foreground shadow-lg shadow-primary/30 transition hover:bg-primary/90 md:hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+        >
+          <span className="relative grid h-7 w-7 place-items-center rounded-full bg-primary-foreground/15" aria-hidden="true">
+            <ShoppingCart className="h-3.5 w-3.5" />
+            {cartCount > 0 && (
+              <span className="absolute -right-1 -top-1 grid h-4 min-w-4 place-items-center rounded-full bg-accent px-1 font-mono text-2xs font-bold text-accent-foreground">
+                {cartCount}
+              </span>
+            )}
+          </span>
+          <span className="font-mono tabular-nums">
+            {cart.length === 0 ? "Panier" : fmt(total, saleCurrency)}
+          </span>
+        </button>
+      )}
+
+      {/* Quick-add product */}
       {isAdmin && (
         <QuickProductDialog
           open={quickOpen}
@@ -439,69 +635,72 @@ export default function POS() {
       {/* Hotkeys help */}
       <Dialog open={showHotkeys} onOpenChange={setShowHotkeys}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Raccourcis clavier</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle className="text-lg font-semibold tracking-display">Raccourcis clavier</DialogTitle>
+          </DialogHeader>
           <div className="space-y-2 text-sm">
-            <div className="flex justify-between"><span>Focus recherche</span><kbd className="rounded bg-secondary px-2 py-0.5 font-mono">F2</kbd></div>
-            <div className="flex justify-between"><span>Encaisser</span><kbd className="rounded bg-secondary px-2 py-0.5 font-mono">F9</kbd></div>
-            <div className="flex justify-between"><span>Vider la recherche</span><kbd className="rounded bg-secondary px-2 py-0.5 font-mono">Échap</kbd></div>
-            <div className="flex justify-between"><span>Ajouter SKU exact au panier</span><kbd className="rounded bg-secondary px-2 py-0.5 font-mono">Entrée</kbd></div>
+            <HotkeyRow label="Focus recherche" k="F2" />
+            <HotkeyRow label="Encaisser" k="F9" />
+            <HotkeyRow label="Vider la recherche" k="Échap" />
+            <HotkeyRow label="Ajouter SKU exact" k="Entrée" />
           </div>
         </DialogContent>
       </Dialog>
 
-      {/* Receipt */}
-      <Dialog open={!!receipt} onOpenChange={(v) => !v && setReceipt(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <ReceiptIcon className="h-5 w-5 text-primary" /> Reçu de vente
-            </DialogTitle>
-          </DialogHeader>
-          {receipt && (
-            <div className="print-receipt font-mono text-sm">
-              <div className="mb-3 text-center">
-                <p className="font-display text-lg font-bold">{settings.shopName}</p>
-                <p className="text-xs text-muted-foreground">{stores.find((s) => s.id === receipt.storeId)?.name}</p>
-                <p className="text-xs text-muted-foreground">{new Date(receipt.date).toLocaleString("fr-FR")}</p>
-                <p className="text-xs text-muted-foreground">Caissier: {receipt.userName}</p>
-                {receipt.customerName && <p className="text-xs text-muted-foreground">Client: {receipt.customerName}</p>}
-                <p className="text-xs text-muted-foreground">Ticket #{receipt.id.slice(-6)}</p>
-              </div>
-              <div className="border-y border-dashed border-border py-2">
-                {receipt.items.map((i) => (
-                  <div key={i.productId} className="flex justify-between text-xs">
-                    <span>{i.quantity}× {i.name}</span>
-                    <span>{fmt(i.price * i.quantity, receipt.currency)}</span>
-                  </div>
-                ))}
-              </div>
-              <div className="space-y-1 py-2 text-xs">
-                <div className="flex justify-between"><span>Sous-total</span><span>{fmt(receipt.subtotal, receipt.currency)}</span></div>
-                {receipt.discount > 0 && <div className="flex justify-between"><span>Remise</span><span>-{fmt(receipt.discount, receipt.currency)}</span></div>}
-                {receipt.pointsRedeemed > 0 && <div className="flex justify-between text-warning"><span>Points utilisés ({receipt.pointsRedeemed})</span><span>-{fmt(receipt.pointsRedeemed * settings.arPerPoint, receipt.currency)}</span></div>}
-                <div className="flex justify-between"><span>TVA ({receipt.taxRate}%)</span><span>{fmt(receipt.tax, receipt.currency)}</span></div>
-                <div className="flex justify-between border-t border-dashed border-border pt-1 font-bold text-base text-primary"><span>TOTAL</span><span>{fmt(receipt.total, receipt.currency)}</span></div>
-                <div className="flex justify-between"><span>Paiement</span><span>{paymentLabel(receipt.paymentMode)}</span></div>
-                {receipt.paymentMode === "CASH" && receipt.change != null && receipt.change > 0 && (
-                  <div className="flex justify-between"><span>Rendu</span><span>{fmt(receipt.change, receipt.currency)}</span></div>
-                )}
-                {receipt.pointsEarned > 0 && (
-                  <div className="flex justify-between text-warning"><span>Points gagnés</span><span>+{receipt.pointsEarned}</span></div>
-                )}
-              </div>
-              <p className="mt-2 text-center text-xs text-muted-foreground">Merci de votre visite ❤️</p>
-              <div className="mt-4 flex gap-2 no-print">
-                <Button variant="outline" className="flex-1" onClick={() => window.print()}>
-                  <Printer className="mr-2 h-4 w-4" /> Imprimer
-                </Button>
-                <Button variant="outline" className="flex-1" onClick={() => downloadReceiptPdf(receipt, stores.find((s) => s.id === receipt.storeId), settings)}>
-                  <FileText className="mr-2 h-4 w-4" /> PDF
-                </Button>
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
+      {/* Receipt overlay (DS) */}
+      <ReceiptOverlay
+        sale={receipt}
+        store={receipt ? stores.find((s) => s.id === receipt.storeId) : undefined}
+        settings={settings}
+        onClose={() => setReceipt(null)}
+      />
+    </div>
+  );
+}
+
+/* ── Tiny building blocks ───────────────────────────────────────── */
+
+function Row({ label, value, tone }: { label: string; value: string; tone?: "warning" }) {
+  return (
+    <div className={`flex items-center justify-between text-sm ${tone === "warning" ? "text-warning-foreground/85" : ""}`}>
+      <span className="text-muted-foreground">{label}</span>
+      <span className="font-mono">{value}</span>
+    </div>
+  );
+}
+
+function PayChip({
+  active, onClick, icon, label,
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon: React.ReactNode;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={active}
+      onClick={onClick}
+      aria-label={`Paiement : ${label}`}
+      className={`flex h-12 flex-col items-center justify-center gap-1 rounded-md border px-2 py-2 text-label font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 ${
+        active
+          ? "border-primary bg-primary/10 text-primary"
+          : "border-border bg-card text-muted-foreground hover:border-foreground/20 hover:text-foreground"
+      }`}
+    >
+      {icon}
+      <span>{label}</span>
+    </button>
+  );
+}
+
+function HotkeyRow({ label, k }: { label: string; k: string }) {
+  return (
+    <div className="flex items-center justify-between rounded-lg bg-secondary/40 px-3 py-2">
+      <span>{label}</span>
+      <KbdHint variant="inline">{k}</KbdHint>
     </div>
   );
 }
@@ -533,45 +732,41 @@ function QuickProductDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
-        <DialogHeader><DialogTitle>Nouveau produit rapide</DialogTitle></DialogHeader>
+        <DialogHeader>
+          <DialogTitle className="text-lg font-semibold tracking-display">Nouveau produit</DialogTitle>
+        </DialogHeader>
         <div className="grid grid-cols-2 gap-3">
           <div className="col-span-2 space-y-1.5">
-            <Label>Nom *</Label>
-            <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} autoFocus />
+            <Label htmlFor="qp-name">Nom *</Label>
+            <Input id="qp-name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} autoFocus />
           </div>
           <div className="space-y-1.5">
-            <Label>Référence (SKU)</Label>
-            <Input value={form.sku} onChange={(e) => setForm({ ...form, sku: e.target.value })} placeholder="auto" />
+            <Label htmlFor="qp-sku">Référence (SKU)</Label>
+            <Input id="qp-sku" value={form.sku} onChange={(e) => setForm({ ...form, sku: e.target.value })} placeholder="auto" />
           </div>
           <div className="space-y-1.5">
-            <Label>Prix (Ar HT) *</Label>
-            <Input type="number" step="1" min={0} value={form.price || ""} onChange={(e) => setForm({ ...form, price: +e.target.value || 0 })} />
+            <Label htmlFor="qp-price">Prix (Ar HT) *</Label>
+            <Input id="qp-price" type="number" step="1" min={0} value={form.price || ""} onChange={(e) => setForm({ ...form, price: +e.target.value || 0 })} />
           </div>
           <div className="space-y-1.5">
-            <Label>Stock</Label>
-            <Input type="number" value={form.stock} onChange={(e) => setForm({ ...form, stock: +e.target.value || 0 })} />
+            <Label htmlFor="qp-stock">Stock</Label>
+            <Input id="qp-stock" type="number" value={form.stock} onChange={(e) => setForm({ ...form, stock: +e.target.value || 0 })} />
           </div>
           <div className="space-y-1.5">
-            <Label>Catégorie</Label>
+            <Label htmlFor="qp-category">Catégorie</Label>
             <CategoryCombobox value={form.category} onChange={(v) => setForm({ ...form, category: v })} options={categories} />
           </div>
         </div>
         <DialogFooter className="gap-2">
-          <Button variant="outline" onClick={() => submit(true)}>Ajouter & continuer</Button>
-          <Button className="gradient-primary text-primary-foreground" onClick={() => submit(false)}>Ajouter</Button>
+          <Button variant="outline" className="rounded-lg" onClick={() => submit(true)}>
+            Ajouter &amp; continuer
+          </Button>
+          <Button variant="gradient" className="rounded-lg" onClick={() => submit(false)}>
+            Ajouter
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
   );
 }
 
-function emojiFor(cat?: string) {
-  switch (cat) {
-    case "Jouets": return "🧸";
-    case "Vêtements": return "👕";
-    case "Accessoires": return "🎒";
-    case "Peluches": return "🐻";
-    case "Jeux éducatifs": return "🧩";
-    default: return "🎁";
-  }
-}

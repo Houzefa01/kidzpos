@@ -34,8 +34,6 @@ export const SaleSchema = z.object({
   userName: z.string(),
   items: z.array(SaleItemSchema),
   subtotal: z.number(),
-  tax: z.number(),
-  taxRate: z.number(),
   discount: z.number(),
   total: z.number(),
   date: z.string(),
@@ -71,7 +69,6 @@ export const UserSchema = z.object({
 });
 
 export const SettingsSchema = z.object({
-  taxRate: z.number(),
   maxDiscountPercent: z.number(),
   pointsPerAr: z.number(),
   arPerPoint: z.number(),

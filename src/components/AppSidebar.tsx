@@ -8,8 +8,8 @@ import {
   Settings as SettingsIcon,
   Store as StoreIcon,
   LogOut,
-  Sparkles,
 } from "lucide-react";
+import { BrandMark } from "@/components/ds";
 import { NavLink } from "@/components/NavLink";
 import { useNavigate } from "react-router-dom";
 import {
@@ -49,11 +49,15 @@ const employeeItems = [
 ];
 
 export function AppSidebar() {
-  const { state } = useSidebar();
+  const { state, isMobile, setOpenMobile } = useSidebar();
   const collapsed = state === "collapsed";
   const { user, logout } = useAuth();
   const { stores } = useData();
   const navigate = useNavigate();
+
+  // Mobile/tablette : auto-close du sheet sidebar au clic d'un lien.
+  // Sur desktop (isMobile=false), aucun effet — le sidebar reste comme il est.
+  const closeMobileSidebar = () => { if (isMobile) setOpenMobile(false); };
 
   // Précharge toutes les pages accessibles, en idle, après l'auth.
   useEffect(() => {
@@ -72,6 +76,7 @@ export function AppSidebar() {
   const currentStore = stores.find((s) => s.id === user.storeId);
 
   const handleLogout = () => {
+    closeMobileSidebar();
     logout();
     navigate("/login");
   };
@@ -79,14 +84,14 @@ export function AppSidebar() {
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader className="border-b border-sidebar-border">
-        <div className="flex items-center gap-2 px-2 py-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg gradient-primary shadow-glow">
-            <Sparkles className="h-5 w-5 text-primary-foreground" />
-          </div>
+        <div className="flex items-center gap-2.5 px-2 py-3.5">
+          <BrandMark />
           {!collapsed && (
-            <div className="flex flex-col">
-              <span className="font-display text-lg font-bold leading-none">KidzPOS</span>
-              <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Multi-magasin</span>
+            <div className="flex flex-col leading-tight">
+              <span className="text-sm font-semibold tracking-tight">KidzPOS</span>
+              <span className="text-2xs uppercase tracking-eyebrow text-muted-foreground">
+                Caisse &amp; gestion
+              </span>
             </div>
           )}
         </div>
@@ -94,7 +99,9 @@ export function AppSidebar() {
 
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel>{user.role === "ADMIN" ? "Administration" : "Espace Caissier"}</SidebarGroupLabel>
+          <SidebarGroupLabel className="text-2xs font-medium uppercase tracking-eyebrow text-muted-foreground/80">
+            {user.role === "ADMIN" ? "Administration" : "Espace caissier"}
+          </SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               {items.map((item) => {
@@ -110,13 +117,16 @@ export function AppSidebar() {
                         end={item.url === "/"}
                         onMouseEnter={() => preloadRoute(item.url)}
                         onFocus={() => preloadRoute(item.url)}
-                        className="flex items-center gap-3 rounded-md px-2 py-2 text-sm transition-colors hover:bg-sidebar-accent"
-                        activeClassName="bg-sidebar-accent text-sidebar-accent-foreground font-semibold border-l-2 border-primary"
+                        onClick={closeMobileSidebar}
+                        className="group relative flex items-center gap-3 rounded-xl px-2.5 py-2 text-sm text-sidebar-foreground transition-all hover:bg-sidebar-accent hover:translate-x-0.5"
+                        activeClassName="!bg-sidebar-accent !text-sidebar-accent-foreground font-semibold before:absolute before:left-0 before:top-1.5 before:bottom-1.5 before:w-[3px] before:rounded-r-full before:bg-gradient-to-b before:from-primary before:to-accent"
                       >
-                        <item.icon className="h-4 w-4 shrink-0" />
+                        <item.icon className="h-4 w-4 shrink-0 transition-transform group-hover:scale-110" />
                         {!collapsed && <span className="flex-1">{item.title}</span>}
                         {!collapsed && showBadge && lowCount > 0 && (
-                          <span className="rounded-full bg-warning/20 px-1.5 py-0.5 text-[10px] font-bold text-warning">{lowCount}</span>
+                          <span className="rounded-full bg-warning/25 px-2 py-0.5 font-mono text-2xs font-bold text-warning-foreground">
+                            {lowCount}
+                          </span>
                         )}
                       </NavLink>
                     </SidebarMenuButton>
@@ -129,14 +139,24 @@ export function AppSidebar() {
 
         {!collapsed && currentStore && (
           <SidebarGroup>
-            <SidebarGroupLabel>Magasin</SidebarGroupLabel>
+            <SidebarGroupLabel className="text-2xs font-medium uppercase tracking-eyebrow text-muted-foreground/80">
+              Magasin
+            </SidebarGroupLabel>
             <SidebarGroupContent>
-              <div className="mx-2 rounded-lg border border-sidebar-border bg-sidebar-accent/40 p-3">
-                <div className="flex items-center gap-2 text-sm font-medium">
-                  <StoreIcon className="h-4 w-4 text-primary" />
-                  {currentStore.name}
+              <div className="mx-2 rounded-lg border border-sidebar-border bg-card p-3">
+                <div className="flex items-start gap-2.5">
+                  <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+                    <StoreIcon className="h-3.5 w-3.5" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold leading-tight tracking-tight">
+                      {currentStore.name}
+                    </p>
+                    <p className="mt-0.5 text-label text-muted-foreground">
+                      {currentStore.location}
+                    </p>
+                  </div>
                 </div>
-                <p className="mt-1 text-xs text-muted-foreground">{currentStore.location}</p>
               </div>
             </SidebarGroupContent>
           </SidebarGroup>
@@ -146,16 +166,28 @@ export function AppSidebar() {
       <SidebarFooter className="border-t border-sidebar-border p-2">
         {!collapsed ? (
           <div className="space-y-2">
-            <div className="px-2">
-              <p className="text-sm font-medium leading-tight">{user.name}</p>
-              <p className="text-xs text-muted-foreground">{user.role === "ADMIN" ? "Administrateur" : "Caissier"}</p>
+            <div className="flex items-center gap-2.5 px-2 py-1">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-primary to-accent text-sm font-semibold text-primary-foreground">
+                {user.name.slice(0, 1).toUpperCase()}
+              </div>
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold leading-tight">{user.name}</p>
+                <p className="text-label text-muted-foreground">
+                  {user.role === "ADMIN" ? "Administrateur" : "Caissier"}
+                </p>
+              </div>
             </div>
-            <Button variant="ghost" size="sm" className="w-full justify-start" onClick={handleLogout}>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full justify-start rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+              onClick={handleLogout}
+            >
               <LogOut className="mr-2 h-4 w-4" /> Déconnexion
             </Button>
           </div>
         ) : (
-          <Button variant="ghost" size="icon" onClick={handleLogout}>
+          <Button variant="ghost" size="icon" onClick={handleLogout} className="hover:text-destructive">
             <LogOut className="h-4 w-4" />
           </Button>
         )}

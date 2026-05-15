@@ -18,9 +18,15 @@ public class JwtService {
     private final long expirationMs;
 
     public JwtService(@Value("${kidzpos.jwt.secret}") String secret,
-                      @Value("${kidzpos.jwt.expiration-hours}") long hours) {
+                      @Value("${kidzpos.jwt.expiration-hours:0}") long hours,
+                      @Value("${kidzpos.auth.access-token-minutes:0}") long minutes) {
         this.key = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
-        this.expirationMs = hours * 3600_000L;
+        // Préfère access-token-minutes (P2). Fallback expiration-hours pour rétrocompat
+        // avec d'anciens .env. Si rien → 15 min (recommandation P2).
+        long ms = minutes > 0 ? minutes * 60_000L
+                : hours > 0 ? hours * 3600_000L
+                : 15 * 60_000L;
+        this.expirationMs = ms;
     }
 
     public String generate(String userId, String email, String role, String storeId) {

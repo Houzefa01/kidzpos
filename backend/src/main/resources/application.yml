@@ -63,7 +63,17 @@ logging:
 kidzpos:
   jwt:
     secret: ${JWT_SECRET:change-me-in-prod-please-use-a-very-long-random-string-32+bytes}
-    expiration-hours: 12
+    # expiration-hours est conservé pour rétrocompat ; access-token-minutes prend
+    # la précédence si défini. Recommandation P2 : 15 minutes.
+    expiration-hours: 0
+  auth:
+    access-token-minutes: ${KIDZPOS_ACCESS_TOKEN_MINUTES:15}
+    refresh-token-days: ${KIDZPOS_REFRESH_TOKEN_DAYS:30}
+    # Cookie refresh httpOnly :
+    #   cookie-secure  : false en LAN HTTP ; TRUE obligatoire en HTTPS prod
+    #   cookie-same-site : Lax (LAN), Strict (prod same-origin), None (cross-origin HTTPS)
+    cookie-secure: ${KIDZPOS_AUTH_COOKIE_SECURE:false}
+    cookie-same-site: ${KIDZPOS_AUTH_COOKIE_SAME_SITE:Lax}
   cors:
     # Patterns autorisés (localhost + IPs LAN privées sur ports Vite/preview, HTTP + HTTPS).
     # ⚠️ En prod derrière Caddy/nginx HTTPS : exporter CORS_ALLOWED_ORIGINS=https://kidzpos.monshop.com

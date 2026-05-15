@@ -121,7 +121,16 @@ export const useAuth = create<AuthState>()(
         broadcastSync("kidzpos-auth");
         return { ok: true, user: u };
       },
-      logout: () => { tokenStore.set(null); set({ user: null }); broadcastSync("kidzpos-auth"); },
+      logout: () => {
+        // P2 : appel serveur pour révoquer le refresh + clear le cookie httpOnly.
+        // Fire-and-forget : si offline, on continue le logout côté client (le
+        // cookie expirera naturellement, et le serveur invalidera tout token
+        // suspect au prochain refresh / login).
+        api("/api/auth/logout", { method: "POST", noAuth: true }).catch(() => {});
+        tokenStore.set(null);
+        set({ user: null });
+        broadcastSync("kidzpos-auth");
+      },
       addUser: async (u, password) => {
         const email = u.email.toLowerCase();
         if (get().users.some((x) => x.email.toLowerCase() === email)) {

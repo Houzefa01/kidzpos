@@ -8,7 +8,10 @@ import java.util.List;
 public class Dtos {
 
     public record LoginReq(@NotBlank String email, @NotBlank String password) {}
+    /** `token` = access token JWT court (15 min par défaut). Le refresh token vit
+     *  dans le cookie httpOnly kidzpos_rt, jamais exposé au JS. */
     public record LoginRes(String token, UserRes user) {}
+    public record RefreshRes(String accessToken) {}
     public record UserRes(String id, String name, String email, String role, String storeId, boolean active) {}
 
     public record CreateUserReq(

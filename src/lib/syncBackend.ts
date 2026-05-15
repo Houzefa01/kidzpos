@@ -1,4 +1,4 @@
-import { api, tokenStore } from "@/lib/apiClient";
+import { api, refreshAccessToken, tokenStore } from "@/lib/apiClient";
 import { useAuth } from "@/store/auth";
 import { useData } from "@/store/data";
 import { useCustomers } from "@/store/customers";
@@ -19,7 +19,13 @@ let _hydrating = false;
 let _needsRehydrate = false;
 
 export async function hydrateFromBackend(): Promise<{ ok: boolean; error?: string }> {
-  if (!tokenStore.get()) return { ok: false, error: "Non authentifié" };
+  // P2 : si l'access token est absent (boot après reload, ou expiration silencieuse),
+  // tenter un refresh via le cookie httpOnly avant de bailer. Si l'utilisateur n'est
+  // pas authentifié du tout, refreshAccessToken renvoie null → early-return propre.
+  if (!tokenStore.get()) {
+    const refreshed = await refreshAccessToken();
+    if (!refreshed) return { ok: false, error: "Non authentifié" };
+  }
   if (_hydrating) {
     // Marquer qu'une nouvelle hydratation est requise après celle en cours
     _needsRehydrate = true;

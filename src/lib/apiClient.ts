@@ -1,31 +1,39 @@
 import { getApiUrl } from "./apiConfig";
 
-const TOKEN_KEY = "kidzpos-jwt";
+/**
+ * Stockage de l'access token JWT.
+ *
+ * EN MÉMOIRE UNIQUEMENT (P2 — sécurité). Plus de localStorage : un attaquant
+ * XSS ne peut pas exfiltrer le token via DOM. La persistance entre reloads
+ * est assurée par le cookie httpOnly `kidzpos_rt` (refresh token rotatif) :
+ * au boot, `bootstrapAuth()` (cf main.tsx / store/auth.ts) appelle
+ * `POST /api/auth/refresh` qui repose silencieusement un access token frais
+ * si le cookie est valide.
+ *
+ * Conséquence : si l'utilisateur reload pendant un long calcul backend, un
+ * refresh silencieux a lieu — invisible côté UX.
+ */
+let accessToken: string | null = null;
 
-function isTokenExpired(token: string): boolean {
+function isJwtExpired(token: string): boolean {
   try {
-    // JWT utilise base64url (- et _ au lieu de + et /) — atob() n'accepte que base64 standard
     const b64 = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
     const payload = JSON.parse(atob(b64)) as { exp?: number };
     return typeof payload.exp === "number" && payload.exp * 1000 < Date.now();
   } catch {
-    // Si on ne peut pas décoder, ne pas supprimer le token — laisser le backend valider
     return false;
   }
 }
 
 export const tokenStore = {
   get: (): string | null => {
-    const t = localStorage.getItem(TOKEN_KEY);
-    if (t && isTokenExpired(t)) {
-      localStorage.removeItem(TOKEN_KEY);
-      return null;
+    if (accessToken && isJwtExpired(accessToken)) {
+      accessToken = null;
     }
-    return t;
+    return accessToken;
   },
   set: (t: string | null) => {
-    if (t) localStorage.setItem(TOKEN_KEY, t);
-    else localStorage.removeItem(TOKEN_KEY);
+    accessToken = t;
   },
 };
 
@@ -44,6 +52,48 @@ export interface ApiOptions {
   body?: unknown;
   timeoutMs?: number;
   noAuth?: boolean;
+  /** Headers additionnels (ex: If-Match). */
+  headers?: Record<string, string>;
+  /** Interne : marqueur pour empêcher la boucle de retry après refresh. */
+  _retried?: boolean;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Single-flight refresh : un seul POST /api/auth/refresh à la fois, même si N
+// requêtes 401 arrivent simultanément. Tous les callers attendent la même
+// Promise et obtiennent le même nouveau token (ou null en cas d'échec).
+// ────────────────────────────────────────────────────────────────────────────
+
+let refreshInFlight: Promise<string | null> | null = null;
+
+/**
+ * Tente un refresh silencieux. Retourne le nouvel access token ou null.
+ * Le cookie httpOnly `kidzpos_rt` est attaché automatiquement grâce à
+ * credentials: "include".
+ *
+ * Exposé pour bootstrapAuth() au démarrage de l'app, et utilisé en interne
+ * par api() sur 401.
+ */
+export function refreshAccessToken(): Promise<string | null> {
+  if (refreshInFlight) return refreshInFlight;
+  refreshInFlight = (async () => {
+    try {
+      const res = await fetch(`${getApiUrl()}/api/auth/refresh`, {
+        method: "POST",
+        credentials: "include",
+      });
+      if (!res.ok) return null;
+      const data = (await res.json()) as { accessToken?: string };
+      const next = data.accessToken ?? null;
+      tokenStore.set(next);
+      return next;
+    } catch {
+      return null;
+    } finally {
+      refreshInFlight = null;
+    }
+  })();
+  return refreshInFlight;
 }
 
 export async function api<T = unknown>(path: string, opts: ApiOptions = {}): Promise<T> {
@@ -56,19 +106,30 @@ export async function api<T = unknown>(path: string, opts: ApiOptions = {}): Pro
       headers: {
         "Content-Type": "application/json",
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(opts.headers ?? {}),
       },
+      // credentials: include → le cookie httpOnly refresh est carrié sur /auth/refresh.
+      // CORS doit allowCredentials=true côté backend (déjà le cas pour origines explicites).
+      credentials: "include",
       body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
       signal: ctrl.signal,
     });
+
+    // 401 + on a un access token → tenter un refresh silencieux + retry une fois.
+    // _retried garde-fou : pas de boucle si le retry lui-même 401.
+    if (res.status === 401 && !opts.noAuth && !opts._retried) {
+      const newToken = await refreshAccessToken();
+      if (newToken) {
+        return api<T>(path, { ...opts, _retried: true });
+      }
+      // Refresh KO → session morte. Notifier l'UI pour rediriger vers /login.
+      tokenStore.set(null);
+      window.dispatchEvent(new CustomEvent("auth:session-expired"));
+    }
+
     const text = await res.text();
     const data = text ? safeJson(text) : null;
     if (!res.ok) {
-      if (res.status === 401) {
-        tokenStore.set(null);
-        // Émettre un événement pour que AppLayout gère la redirection via React Router
-        // Évite le hard reload qui perd l'état React
-        window.dispatchEvent(new CustomEvent("auth:session-expired"));
-      }
       throw new ApiError(res.status, data);
     }
     return data as T;
@@ -88,7 +149,6 @@ export async function pingBackend(timeoutMs = 1500): Promise<boolean> {
     const timer = setTimeout(() => ctrl.abort(), timeoutMs);
     const res = await fetch(`${getApiUrl()}/actuator/health`, {
       signal: ctrl.signal,
-      // évite le bruit console
       mode: "cors",
     }).catch(() => null);
     clearTimeout(timer);

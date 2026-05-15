@@ -20,7 +20,8 @@ public class SecurityConfig {
 
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http, JwtAuthFilter jwtFilter,
-                                           LoginRateLimitFilter loginRateLimitFilter) throws Exception {
+                                           LoginRateLimitFilter loginRateLimitFilter,
+                                           RefreshRateLimitFilter refreshRateLimitFilter) throws Exception {
         http
             .csrf(c -> c.disable())
             .cors(c -> {})
@@ -56,6 +57,7 @@ public class SecurityConfig {
             // correction : rate-limit ne s'active que sur POST /api/auth/login (qui n'a
             // pas de header Authorization), et jwt ne s'active qu'avec un header.
             .addFilterBefore(loginRateLimitFilter, UsernamePasswordAuthenticationFilter.class)
+            .addFilterBefore(refreshRateLimitFilter, UsernamePasswordAuthenticationFilter.class)
             .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();
     }

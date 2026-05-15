@@ -9,6 +9,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -42,6 +43,9 @@ public class RefreshTokenService {
     private final long ttlMs;
     private final SecureRandom random = new SecureRandom();
     private final Counter reuseDetected;
+    private final Counter refreshSuccess;
+    private final Counter refreshFailure;
+    private final Counter cleanupDeleted;
 
     public RefreshTokenService(RefreshTokenRepository repo,
                                @Value("${kidzpos.auth.refresh-token-days:30}") long days,
@@ -51,6 +55,15 @@ public class RefreshTokenService {
         this.ttlMs = Duration.ofDays(days).toMillis();
         this.reuseDetected = Counter.builder("kidzpos.auth.refresh_reuse_detected")
                 .description("Refresh tokens réutilisés après révocation (vol suspecté)")
+                .register(meterRegistry);
+        this.refreshSuccess = Counter.builder("kidzpos.auth.refresh_success")
+                .description("Rotations refresh token réussies")
+                .register(meterRegistry);
+        this.refreshFailure = Counter.builder("kidzpos.auth.refresh_failure")
+                .description("Tentatives de refresh rejetées (raison dans les logs)")
+                .register(meterRegistry);
+        this.cleanupDeleted = Counter.builder("kidzpos.auth.refresh_cleanup_deleted")
+                .description("Refresh tokens expirés supprimés par le job de cleanup")
                 .register(meterRegistry);
     }
 
@@ -86,11 +99,16 @@ public class RefreshTokenService {
      */
     @Transactional
     public Optional<Issued> rotate(String cleartext, HttpServletRequest req) {
-        if (cleartext == null || cleartext.isBlank()) return Optional.empty();
+        if (cleartext == null || cleartext.isBlank()) {
+            refreshFailure.increment();
+            log.info("Refresh failed: reason=no_cookie ip={}", req.getRemoteAddr());
+            return Optional.empty();
+        }
         String hash = sha256(cleartext);
         Optional<RefreshToken> opt = repo.findByTokenHash(hash);
         if (opt.isEmpty()) {
-            log.debug("Refresh rejected: unknown token hash");
+            refreshFailure.increment();
+            log.info("Refresh failed: reason=unknown ip={}", req.getRemoteAddr());
             return Optional.empty();
         }
         RefreshToken rt = opt.get();
@@ -99,15 +117,18 @@ public class RefreshTokenService {
         if (rt.getRevokedAt() != null) {
             // Réutilisation d'un token déjà révoqué → vol suspecté.
             // On invalide TOUS les tokens actifs de cet user (force re-login partout).
+            refreshFailure.increment();
             reuseDetected.increment();
             int revokedNow = repo.revokeAllForUser(rt.getUserId(), now);
-            log.warn("REFRESH REUSE detected: tokenId={} userId={} revoked {} active sibling tokens",
-                    rt.getId(), rt.getUserId(), revokedNow);
+            log.warn("Refresh failed: reason=reuse_detected tokenId={} userId={} ip={} cascadedRevoke={}",
+                    rt.getId(), rt.getUserId(), req.getRemoteAddr(), revokedNow);
             return Optional.empty();
         }
 
         if (rt.getExpiresAt().isBefore(now)) {
-            log.debug("Refresh rejected: expired tokenId={}", rt.getId());
+            refreshFailure.increment();
+            log.info("Refresh failed: reason=expired tokenId={} userId={} ip={}",
+                    rt.getId(), rt.getUserId(), req.getRemoteAddr());
             return Optional.empty();
         }
 
@@ -117,6 +138,9 @@ public class RefreshTokenService {
         rt.setRevokedAt(now);
         rt.setReplacedBy(newId);
         repo.save(rt);
+        refreshSuccess.increment();
+        log.info("Refresh OK: rotated tokenId={} → newId={} userId={} ip={}",
+                rt.getId(), newId, rt.getUserId(), req.getRemoteAddr());
         return Optional.of(issued);
     }
 
@@ -142,6 +166,30 @@ public class RefreshTokenService {
                 .filter(rt -> rt.getRevokedAt() == null)
                 .filter(rt -> rt.getExpiresAt().isAfter(Instant.now()))
                 .map(RefreshToken::getUserId);
+    }
+
+    /**
+     * Cleanup quotidien des refresh tokens expirés.
+     *
+     * Cron 03:00 chaque jour ; supprime les tokens dont expires_at < (now - 24h)
+     * — on garde 24h de grâce après expiration pour permettre une investigation
+     * en cas d'incident (audit chain replaced_by). Retourne le count pour
+     * faciliter les tests unitaires.
+     *
+     * Idempotent : si rien à supprimer, no-op silencieux (log debug).
+     */
+    @Scheduled(cron = "${kidzpos.auth.cleanup-cron:0 0 3 * * *}")
+    @Transactional
+    public int cleanupExpired() {
+        Instant cutoff = Instant.now().minus(Duration.ofHours(24));
+        int deleted = repo.deleteExpiredBefore(cutoff);
+        if (deleted > 0) {
+            cleanupDeleted.increment(deleted);
+            log.info("Refresh tokens cleanup: deleted {} expired entries (cutoff={})", deleted, cutoff);
+        } else {
+            log.debug("Refresh tokens cleanup: no expired entries to delete");
+        }
+        return deleted;
     }
 
     private String generateCleartext() {

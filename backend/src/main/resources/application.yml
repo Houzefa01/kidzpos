@@ -1,6 +1,11 @@
 server:
   port: ${SERVER_PORT:8080}
   address: 0.0.0.0       # écoute sur toutes les interfaces (LAN)
+  # P2.2 : derrière un reverse-proxy (Caddy/nginx), Tomcat lit X-Forwarded-For
+  # et expose la VRAIE IP cliente via req.getRemoteAddr() — utilisé par
+  # LoginRateLimitFilter et RefreshRateLimitFilter. NATIVE n'accepte les headers
+  # que depuis les proxies locaux par défaut (cf server.tomcat.remoteip.*).
+  forward-headers-strategy: native
   tomcat:
     accesslog:
       enabled: true

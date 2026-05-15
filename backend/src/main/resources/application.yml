@@ -4,9 +4,12 @@ server:
   tomcat:
     accesslog:
       enabled: true
-      # Chemin absolu requis : Tomcat résout les chemins relatifs depuis catalina.base
-      # (un tmp dir pour Spring Boot embarqué), pas depuis le CWD.
-      directory: ${TOMCAT_ACCESSLOG_DIR:/home/Hsavatra/Bureau/sync-till-genius-main/logs}
+      # Tomcat résout les chemins relatifs depuis catalina.base (tmp dir Spring Boot
+      # embarqué), pas depuis le CWD. ./logs reste utilisable et reste à côté du
+      # JAR sur la plupart des déploiements (start-server.sh crée ce dossier).
+      # Pour forcer un chemin absolu en prod (/var/log/kidzpos, etc.), exporter
+      # TOMCAT_ACCESSLOG_DIR — start-server.sh le fait déjà avec un absolu.
+      directory: ${TOMCAT_ACCESSLOG_DIR:./logs}
       prefix: access
       suffix: .log
       buffered: false           # flush immédiat pour monitoring temps réel

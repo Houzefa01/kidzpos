@@ -5,6 +5,15 @@ import { BackupSchema } from "@/lib/schemas";
 import { pushMutation } from "@/store/backend";
 import { useCustomers } from "@/store/customers";
 
+/** UUID stable pour l'idempotence des mouvements de stock. Identique pour tout replay
+ *  d'une même mutation (le body persisté dans l'outbox conserve cet ID). */
+function makeClientMovementId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `mv-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 export interface Store {
   id: string;
   name: string;
@@ -276,6 +285,9 @@ export const useData = create<DataState>()(
         if (!p) return { ok: false, error: "Produit introuvable" };
         const newStock = p.stock + delta;
         if (newStock < 0) return { ok: false, error: "Stock négatif interdit" };
+        // Idempotence : même UUID conservé dans le body persisté → replay outbox
+        // détecté par le backend (uk_stock_movements_client_id, V8).
+        const clientMovementId = makeClientMovementId();
         const move: StockMove = {
           id: `m${Date.now()}`,
           date: new Date().toISOString(),
@@ -288,7 +300,12 @@ export const useData = create<DataState>()(
           moves: [move, ...s.moves].slice(0, 1000),
         }));
         broadcastSync("kidzpos-data");
-        pushMutation("/api/stock/adjust", "POST", { productId, delta, reason }, `adjust:${productId}:${Date.now()}`);
+        pushMutation(
+          "/api/stock/adjust",
+          "POST",
+          { productId, delta, reason, clientMovementId },
+          `adjust:${clientMovementId}`,
+        );
         return { ok: true };
       },
       transferStock: (productId, fromStoreId, toStoreId, qty, by) => {
@@ -297,6 +314,7 @@ export const useData = create<DataState>()(
         const src = get().products.find((p) => p.id === productId && p.storeId === fromStoreId);
         if (!src) return { ok: false, error: "Produit introuvable dans le magasin source" };
         if (src.stock < qty) return { ok: false, error: "Stock source insuffisant" };
+        const clientMovementId = makeClientMovementId();
         // Trouver ou créer la version destination par SKU
         let dst = get().products.find((p) => p.storeId === toStoreId && p.sku.toLowerCase() === src.sku.toLowerCase());
         const now = new Date().toISOString();
@@ -317,7 +335,12 @@ export const useData = create<DataState>()(
           return { products, moves: [moveOut, ...s.moves].slice(0, 1000) };
         });
         broadcastSync("kidzpos-data");
-        pushMutation("/api/stock/transfer", "POST", { productId, targetStoreId: toStoreId, quantity: qty }, `transfer:${productId}:${Date.now()}`);
+        pushMutation(
+          "/api/stock/transfer",
+          "POST",
+          { productId, targetStoreId: toStoreId, quantity: qty, clientMovementId },
+          `transfer:${clientMovementId}`,
+        );
         return { ok: true };
       },
       parkCart: (cart) => {

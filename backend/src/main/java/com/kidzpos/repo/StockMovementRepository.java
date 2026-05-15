@@ -7,4 +7,7 @@ import java.util.List;
 public interface StockMovementRepository extends JpaRepository<StockMovement, Long> {
     List<StockMovement> findByStoreIdOrderByDateDesc(String storeId);
     List<StockMovement> findAllByOrderByDateDesc();
+
+    /** Garde d'idempotence pour adjust/transfer (cf V8). */
+    boolean existsByClientMovementId(String clientMovementId);
 }

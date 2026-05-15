@@ -99,6 +99,17 @@ export function startBackendWatcher() {
 
 import { api } from "@/lib/apiClient";
 
+/**
+ * Endpoints qui peuvent transporter un password en clair (création / update user).
+ * On REFUSE la mise en outbox pour ces appels : localStorage est lisible par toute
+ * extension/XSS, et le password traînerait en clair jusqu'au prochain flush.
+ * DELETE /api/users n'est pas concerné (pas de body sensible).
+ */
+function isSensitiveAuthMutation(path: string, method: string): boolean {
+  if (method !== "POST" && method !== "PUT") return false;
+  return /^\/api\/users(\/|$)/.test(path);
+}
+
 export async function pushMutation(
   path: string,
   method: "POST" | "PUT" | "PATCH" | "DELETE",
@@ -106,7 +117,12 @@ export async function pushMutation(
   ref?: string
 ) {
   const { lanReachable } = useBackend.getState();
+  const sensitive = isSensitiveAuthMutation(path, method);
+
   if (!lanReachable) {
+    if (sensitive) {
+      return { queued: false, error: "Connexion serveur requise pour cette opération" };
+    }
     outbox.enqueue({ path, method, body, ref });
     useBackend.getState().refreshPending();
     return { queued: true };
@@ -120,8 +136,14 @@ export async function pushMutation(
     if (status && status >= 400 && status < 500) {
       return { queued: false, error: apiErr?.message };
     }
-    outbox.enqueue({ path, method, body, ref });
+    // 5xx / timeout : on bascule lanReachable=false dans tous les cas. Mais pour
+    // les mutations sensibles on REFUSE l'enqueue → aucun password en clair n'atterrit
+    // jamais dans localStorage. L'opérateur devra réessayer manuellement à la reprise.
     useBackend.getState().setLan(false);
+    if (sensitive) {
+      return { queued: false, error: "Échec serveur — opération sensible non enregistrée, recommencez" };
+    }
+    outbox.enqueue({ path, method, body, ref });
     useBackend.getState().refreshPending();
     return { queued: true };
   }

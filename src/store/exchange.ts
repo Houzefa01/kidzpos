@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { api } from "@/lib/apiClient";
+import { api, tokenStore } from "@/lib/apiClient";
 import { toast } from "sonner";
 
 interface ExchangeState {
@@ -20,21 +20,25 @@ export const useExchange = create<ExchangeState>()(
       fetchedAt: null,
       source: "default",
       refresh: async (silent = false) => {
-        // 1) Tenter le backend (qui appelle l'API en ligne pour nous)
+        // 1) Tenter le backend SI authentifié — sinon /api/exchange/refresh
+        // renvoie 403 (endpoint sous auth). Cas typique : refresh au boot avant
+        // login. On saute directement au fallback navigateur dans ce cas.
         let backendLive = false;
-        try {
-          const r = await api<{ rate: number; fetchedAt: string | null; source: string }>("/api/exchange/refresh", {
-            method: "POST", timeoutMs: 3000,
-          });
-          if (r.source === "live") {
-            set({ rate: r.rate, fetchedAt: Date.now(), source: "live" });
-            if (!silent) toast.success(`Taux mis à jour : 1 € = ${Math.round(r.rate)} Ar`);
-            return;
-          }
-          // Backend a répondu mais avec cached/default — internet indispo côté backend
-          // → tenter depuis le navigateur
-          backendLive = false;
-        } catch (_) { /* on essaie le fallback navigateur */ }
+        if (tokenStore.get()) {
+          try {
+            const r = await api<{ rate: number; fetchedAt: string | null; source: string }>("/api/exchange/refresh", {
+              method: "POST", timeoutMs: 3000,
+            });
+            if (r.source === "live") {
+              set({ rate: r.rate, fetchedAt: Date.now(), source: "live" });
+              if (!silent) toast.success(`Taux mis à jour : 1 € = ${Math.round(r.rate)} Ar`);
+              return;
+            }
+            // Backend a répondu mais avec cached/default — internet indispo côté backend
+            // → tenter depuis le navigateur
+            backendLive = false;
+          } catch (_) { /* on essaie le fallback navigateur */ }
+        }
 
         // 2) Si le backend n'a pas eu de taux frais, tenter depuis le navigateur
         // I7 : open.er-api.com (gratuit sans clé) au lieu de api.exchangerate.host (paywall depuis 2024)

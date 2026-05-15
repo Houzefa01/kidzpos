@@ -59,13 +59,17 @@ public class Dtos {
     public record StockAdjustReq(
             @NotBlank String productId,
             int delta,                  // signé
-            String reason
+            String reason,
+            // UUID stable côté client pour l'idempotence au replay outbox (cf V8).
+            // Optionnel : ancien clients sans ce champ restent acceptés.
+            String clientMovementId
     ) {}
 
     public record TransferReq(
             @NotBlank String productId,
             @NotBlank String targetStoreId,
-            @Min(1) int quantity
+            @Min(1) int quantity,
+            String clientMovementId
     ) {}
 
     public record SettingsReq(

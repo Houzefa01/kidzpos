@@ -4,6 +4,8 @@
 
 import { api, ApiError } from "./apiClient";
 import { z } from "zod";
+import { toast } from "sonner";
+import { useFailedReplays } from "@/store/failedReplays";
 
 export interface OutboxEntry {
   id: string;
@@ -91,8 +93,21 @@ export async function flushOutbox(): Promise<{ sent: number; failed: number }> {
       } catch (err) {
         failed++;
         // Marque l'erreur mais on garde l'entrée pour réessayer plus tard,
-        // SAUF si c'est une erreur 4xx (donnée invalide) → on supprime sinon ça boucle.
+        // SAUF si c'est une erreur 4xx (donnée invalide) → on déplace vers
+        // failedReplays (visibilité opérateur) au lieu de supprimer silencieusement.
         if (err instanceof ApiError && err.status >= 400 && err.status < 500) {
+          const message =
+            (err.body as { error?: string } | null)?.error ?? err.message ?? `HTTP ${err.status}`;
+          useFailedReplays.getState().add({
+            ts: Date.now(),
+            path: e.path,
+            method: e.method,
+            body: e.body,
+            ref: e.ref,
+            status: err.status,
+            error: message,
+          });
+          toast.error(`Mutation rejetée (${err.status}) : ${message}`, { duration: 6000 });
           outbox.remove(e.id);
         } else {
           const all = read().map((x) =>

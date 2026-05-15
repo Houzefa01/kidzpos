@@ -37,6 +37,13 @@ public class StockController {
     @PostMapping("/adjust")
     @Transactional
     public ResponseEntity<?> adjust(@Valid @RequestBody StockAdjustReq r, @AuthenticationPrincipal AuthPrincipal me) {
+        // Idempotence (V8) : si ce mouvement client a déjà été appliqué (replay outbox),
+        // on retourne l'état courant sans dupliquer le delta.
+        if (isIdempotentReplay(r.clientMovementId())) {
+            return products.findById(r.productId())
+                    .<ResponseEntity<?>>map(ResponseEntity::ok)
+                    .orElseGet(() -> ResponseEntity.ok(Map.of("idempotent", true)));
+        }
         var p = products.findById(r.productId()).orElse(null);
         if (p == null) return ResponseEntity.notFound().build();
         int newStock = p.getStock() + r.delta();
@@ -46,7 +53,9 @@ public class StockController {
                 .productId(p.getId()).storeId(p.getStoreId())
                 .type(r.delta() >= 0 ? MovementType.IN : MovementType.OUT)
                 .quantity(r.delta()).date(Instant.now())
-                .userId(me.id()).reason(r.reason()).build());
+                .userId(me.id()).reason(r.reason())
+                .clientMovementId(blankToNull(r.clientMovementId()))
+                .build());
         bus.publish("product", "updated", p);
         bus.publish("stock", "moved", Map.of("productId", p.getId()));
         return ResponseEntity.ok(p);
@@ -56,6 +65,11 @@ public class StockController {
     @Transactional
     public ResponseEntity<?> transfer(@Valid @RequestBody TransferReq r, @AuthenticationPrincipal AuthPrincipal me) {
         if (!"ADMIN".equals(me.role())) return ResponseEntity.status(403).body(Map.of("error", "Admin requis"));
+        // Idempotence (V8) : seul le mouvement source porte clientMovementId,
+        // sa présence en base signifie que les deux moves (out/in) ont déjà été inscrits.
+        if (isIdempotentReplay(r.clientMovementId())) {
+            return ResponseEntity.ok(Map.of("idempotent", true));
+        }
         var src = products.findById(r.productId()).orElse(null);
         if (src == null) return ResponseEntity.notFound().build();
         if (src.getStock() < r.quantity()) return ResponseEntity.badRequest().body(Map.of("error", "Stock insuffisant"));
@@ -73,11 +87,15 @@ public class StockController {
         target.setStock(target.getStock() + r.quantity());
         products.save(src); products.save(target);
 
+        // clientMovementId porté uniquement par le mouvement source (le partner stays null)
+        // pour respecter la contrainte unique partielle sans casser la garde d'idempotence.
         moves.save(StockMovement.builder()
                 .productId(src.getId()).storeId(src.getStoreId())
                 .type(MovementType.TRANSFER).quantity(-r.quantity())
                 .date(Instant.now()).userId(me.id())
-                .targetStoreId(r.targetStoreId()).build());
+                .targetStoreId(r.targetStoreId())
+                .clientMovementId(blankToNull(r.clientMovementId()))
+                .build());
         moves.save(StockMovement.builder()
                 .productId(target.getId()).storeId(target.getStoreId())
                 .type(MovementType.TRANSFER).quantity(r.quantity())
@@ -87,5 +105,15 @@ public class StockController {
         bus.publish("product", "bulkUpdated", null);
         bus.publish("stock", "transferred", Map.of("from", src.getId(), "to", target.getId()));
         return ResponseEntity.ok(Map.of("source", src, "target", target));
+    }
+
+    private boolean isIdempotentReplay(String clientMovementId) {
+        return clientMovementId != null
+                && !clientMovementId.isBlank()
+                && moves.existsByClientMovementId(clientMovementId);
+    }
+
+    private static String blankToNull(String s) {
+        return (s == null || s.isBlank()) ? null : s;
     }
 }

@@ -246,5 +246,6 @@ public class SaleController {
         return ResponseEntity.status(409).body(Map.of("error", "Conflit numérotation"));
     }
 
-    private static double round(double v) { return Math.round(v * 100.0) / 100.0; }
+    /** Ariary canonique : pas de centimes. On arrondit à l'entier le plus proche. */
+    private static double round(double v) { return Math.round(v); }
 }

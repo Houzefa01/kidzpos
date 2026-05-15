@@ -20,4 +20,10 @@ public class StockMovement {
     private String reason;
     private String relatedSaleId;
     private String targetStoreId;
+
+    /** UUID stable généré côté client pour adjust/transfer. Garantit l'idempotence
+     *  au replay outbox via l'unique partiel uk_stock_movements_client_id (V8).
+     *  NULL pour les mouvements internes serveur (SALE, REFUND). */
+    @Column(name = "client_movement_id", length = 64)
+    private String clientMovementId;
 }

@@ -25,11 +25,16 @@ import java.util.Map;
 @RequestMapping("/api/exchange")
 public class ExchangeController {
 
+    /** Throttle inter-appels : 60s entre deux fetchs externes effectifs.
+     *  open.er-api.com est gratuit mais a un quota ; on cache au-delà. */
+    private static final long REFRESH_MIN_INTERVAL_MS = 60_000L;
+
     @Value("${kidzpos.exchange.eur-to-ar-default:4900}")
     private double defaultRate;
 
     private volatile double lastRate = -1;
     private volatile Instant lastFetched = null;
+    private final java.util.concurrent.atomic.AtomicLong lastRefreshAttemptMs = new java.util.concurrent.atomic.AtomicLong(0);
 
     private final HttpClient http = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(3))
@@ -47,6 +52,19 @@ public class ExchangeController {
 
     @PostMapping("/refresh")
     public ResponseEntity<?> refresh() {
+        // Throttle : si on a tenté un refresh il y a < 60s, renvoyer le cache sans appel externe.
+        long now = System.currentTimeMillis();
+        long last = lastRefreshAttemptMs.get();
+        if (last != 0 && now - last < REFRESH_MIN_INTERVAL_MS) {
+            double rate = lastRate > 0 ? lastRate : defaultRate;
+            Map<String, Object> body = new HashMap<>();
+            body.put("rate", rate);
+            body.put("fetchedAt", lastFetched == null ? null : lastFetched.toString());
+            body.put("source", lastRate > 0 ? "cached" : "default");
+            body.put("note", "throttled");
+            return ResponseEntity.ok(body);
+        }
+        lastRefreshAttemptMs.set(now);
         try {
             // I7 : open.er-api.com renvoie {"result":"success","rates":{"MGA":...}, ...}
             var req = HttpRequest.newBuilder()

@@ -40,7 +40,9 @@ public class Sale {
     private Double change;
     private String refundedFrom;
 
-    /** Devise affichée au client lors de la vente ("AR" ou "EUR").
-     *  Les montants sont stockés en EUR ; ce champ sert au rendu reçu / historique. */
+    /** Devise affichée au client lors de la vente ("AR" ou "EUR"), figée au checkout.
+     *  Les montants (subtotal, total, amountPaid…) sont stockés en Ariary canonique
+     *  (cf V5) ; ce champ sert au rendu du reçu/historique avec la devise d'origine
+     *  même si l'opérateur change la devise globale ultérieurement. */
     @Column(nullable = false, length = 10) @Builder.Default private String currency = "AR";
 }

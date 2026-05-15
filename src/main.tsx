@@ -5,6 +5,7 @@ import { startBackendWatcher } from "@/store/backend";
 import { useExchange } from "@/store/exchange";
 import { refreshAccessToken } from "@/lib/apiClient";
 import { useAuth } from "@/store/auth";
+import { startMetricsReporter } from "@/lib/metricsReporter";
 
 // Thème initial
 const stored = localStorage.getItem("kidzpos-theme");
@@ -32,6 +33,7 @@ queueMicrotask(async () => {
     }
   }
   startBackendWatcher();
+  startMetricsReporter();
   if (navigator.onLine) {
     useExchange.getState().refresh(true);
   }

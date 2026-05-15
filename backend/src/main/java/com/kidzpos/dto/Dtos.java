@@ -82,4 +82,15 @@ public class Dtos {
             @NotBlank String shopName,
             String currency
     ) {}
+
+    /**
+     * Snapshot métriques offline-first envoyé périodiquement par chaque caisse.
+     * Borne dure 100 samples / requête (sanity-check anti-flood ; valeurs hors
+     * borne sont filtrées côté serveur, pas rejetées).
+     */
+    public record FrontendMetricsReq(
+            @PositiveOrZero int outboxSize,
+            @PositiveOrZero int failedReplaysCount,
+            List<@PositiveOrZero @DecimalMax("3600000") Double> syncLatencyMs
+    ) {}
 }

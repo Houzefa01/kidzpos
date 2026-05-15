@@ -159,6 +159,11 @@ const defaultTransport: Transport = {
       for (const e of entries) {
         try {
           await api(e.path, { method: e.method, body: e.body, timeoutMs: 5000 });
+          // P3 : mesurer la latence entre l'enqueue et l'application réussie.
+          // e.ts est posé par outbox.enqueue. Précis à la ms du client (pas
+          // d'horloge serveur ici — c'est volontaire : on mesure le ressenti
+          // utilisateur "combien de temps mon action a-t-elle attendu").
+          recordLatencySample(Date.now() - e.ts);
           outbox.remove(e.id);
           sent++;
         } catch (err) {
@@ -194,6 +199,30 @@ const defaultTransport: Transport = {
 
 // Verrou réentrance pour drainQueue (cf flushing flag historique)
 const drainingRef = { value: false };
+
+// ────────────────────────────────────────────────────────────────────────────
+// Sync latency samples (P3) — exposés à metricsReporter.
+// On garde un ring buffer borné pour éviter toute fuite mémoire si le reporter
+// est désactivé ou ne tourne pas. Lecture-destructive (drainLatencySamples).
+// ────────────────────────────────────────────────────────────────────────────
+const LATENCY_BUFFER_MAX = 100;
+const latencySamples: number[] = [];
+
+function recordLatencySample(ms: number) {
+  if (!Number.isFinite(ms) || ms < 0) return;
+  if (latencySamples.length >= LATENCY_BUFFER_MAX) {
+    latencySamples.shift();
+  }
+  latencySamples.push(ms);
+}
+
+/** Retourne ET vide le buffer interne. Appelé par metricsReporter à chaque tick. */
+export function drainLatencySamples(): number[] {
+  if (latencySamples.length === 0) return [];
+  const out = latencySamples.slice();
+  latencySamples.length = 0;
+  return out;
+}
 
 /** Instance singleton utilisée par pushMutation et backend.pulse. */
 export const syncService = createSyncService(defaultTransport);

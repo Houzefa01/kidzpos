@@ -17,6 +17,9 @@ export const ProductSchema = z.object({
   category: z.string().nullish(),
   sku: z.string(),
   createdAt: z.string(),
+  // V11 : optimistic locking. Optionnel pour rétrocompat avec d'éventuels
+  // anciens payloads en localStorage.
+  version: z.number().nullish(),
 });
 
 export const SaleItemSchema = z.object({

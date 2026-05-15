@@ -4,9 +4,12 @@ import com.kidzpos.domain.MovementType;
 import com.kidzpos.domain.StockMovement;
 import com.kidzpos.dto.Dtos.*;
 import com.kidzpos.events.EventBus;
+import com.kidzpos.observability.BusinessMetrics;
 import com.kidzpos.repo.ProductRepository;
 import com.kidzpos.repo.StockMovementRepository;
 import com.kidzpos.security.JwtAuthFilter.AuthPrincipal;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -21,12 +24,16 @@ import java.util.Map;
 @RequestMapping("/api/stock")
 public class StockController {
 
+    private static final Logger log = LoggerFactory.getLogger(StockController.class);
+
     private final ProductRepository products;
     private final StockMovementRepository moves;
     private final EventBus bus;
+    private final BusinessMetrics metrics;
 
-    public StockController(ProductRepository products, StockMovementRepository moves, EventBus bus) {
-        this.products = products; this.moves = moves; this.bus = bus;
+    public StockController(ProductRepository products, StockMovementRepository moves,
+                           EventBus bus, BusinessMetrics metrics) {
+        this.products = products; this.moves = moves; this.bus = bus; this.metrics = metrics;
     }
 
     @GetMapping("/movements")
@@ -108,9 +115,14 @@ public class StockController {
     }
 
     private boolean isIdempotentReplay(String clientMovementId) {
-        return clientMovementId != null
+        boolean replay = clientMovementId != null
                 && !clientMovementId.isBlank()
                 && moves.existsByClientMovementId(clientMovementId);
+        if (replay) {
+            metrics.stockIdempotentReplay.increment();
+            log.info("Idempotent stock replay absorbed: clientMovementId={}", clientMovementId);
+        }
+        return replay;
     }
 
     private static String blankToNull(String s) {

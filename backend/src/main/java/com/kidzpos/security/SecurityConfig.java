@@ -30,6 +30,9 @@ public class SecurityConfig {
                 .requestMatchers(
                     "/api/auth/**",
                     "/actuator/health",
+                    // /actuator/prometheus est ouvert pour scraping. En prod : restreindre
+                    // au CIDR du Prometheus via le reverse-proxy (Caddy/nginx).
+                    "/actuator/prometheus",
                     "/api/events/stream"
                 ).permitAll()
                 // M4 : /api/exchange/refresh déclenche un appel HTTP sortant ⇒ exiger une auth

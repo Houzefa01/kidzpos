@@ -3,25 +3,42 @@ package com.kidzpos.web;
 import com.kidzpos.domain.Product;
 import com.kidzpos.dto.Dtos.ProductReq;
 import com.kidzpos.events.EventBus;
+import com.kidzpos.observability.BusinessMetrics;
 import com.kidzpos.repo.ProductRepository;
 import jakarta.validation.Valid;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/products")
 public class ProductController {
     private final ProductRepository repo;
     private final EventBus bus;
-    public ProductController(ProductRepository repo, EventBus bus) { this.repo = repo; this.bus = bus; }
+    private final BusinessMetrics metrics;
+    public ProductController(ProductRepository repo, EventBus bus, BusinessMetrics metrics) {
+        this.repo = repo; this.bus = bus; this.metrics = metrics;
+    }
 
     @GetMapping
     public List<Product> list(@RequestParam(required = false) String storeId) {
         return storeId == null ? repo.findAll() : repo.findByStoreId(storeId);
+    }
+
+    /** Variant GET unique : retourne ETag = version pour permettre If-Match au PUT. */
+    @GetMapping("/{id}")
+    public ResponseEntity<Product> getOne(@PathVariable String id) {
+        return repo.findById(id)
+                .map(p -> ResponseEntity.ok()
+                        .header(HttpHeaders.ETAG, etagOf(p))
+                        .body(p))
+                .orElse(ResponseEntity.notFound().build());
     }
 
     @PostMapping
@@ -42,20 +59,54 @@ public class ProductController {
 
     @PutMapping("/{id}")
     @Transactional
-    public ResponseEntity<?> update(@PathVariable String id, @Valid @RequestBody ProductReq r) {
+    public ResponseEntity<?> update(@PathVariable String id, @Valid @RequestBody ProductReq r,
+                                    @RequestHeader(value = HttpHeaders.IF_MATCH, required = false) String ifMatch) {
         var p = repo.findById(id).orElse(null);
         if (p == null) return ResponseEntity.notFound().build();
+        // Optimistic locking : si le client a lu un ETag (via GET /{id}) et le repasse
+        // en If-Match, on rejette 412 si la version a changé entretemps. L'absence du
+        // header reste tolérée pour rétrocompat avec clients qui ne lisent pas l'ETag.
+        if (ifMatch != null && !ifMatch.isBlank()) {
+            Integer expected = parseEtag(ifMatch);
+            if (expected == null || !expected.equals(p.getVersion())) {
+                metrics.optimisticLockConflict.increment();
+                return ResponseEntity.status(412)
+                        .body(Map.of("error", "Le produit a été modifié entretemps, rechargez"));
+            }
+        }
         if (!p.getSku().equalsIgnoreCase(r.sku())) {
             var conflict = repo.findByStoreIdAndSkuIgnoreCase(r.storeId(), r.sku());
             if (conflict.isPresent() && !conflict.get().getId().equals(id)) {
-                return ResponseEntity.badRequest().body(java.util.Map.of("error", "SKU déjà utilisé"));
+                return ResponseEntity.badRequest().body(Map.of("error", "SKU déjà utilisé"));
             }
         }
         p.setName(r.name()); p.setPrice(r.price()); p.setStock(r.stock());
         p.setStoreId(r.storeId()); p.setCategory(r.category()); p.setSku(r.sku());
-        var saved = repo.save(p);
-        bus.publish("product", "updated", saved);
-        return ResponseEntity.ok(saved);
+        try {
+            var saved = repo.saveAndFlush(p);  // flush pour déclencher la check @Version maintenant
+            bus.publish("product", "updated", saved);
+            return ResponseEntity.ok()
+                    .header(HttpHeaders.ETAG, etagOf(saved))
+                    .body(saved);
+        } catch (ObjectOptimisticLockingFailureException e) {
+            metrics.optimisticLockConflict.increment();
+            return ResponseEntity.status(412)
+                    .body(Map.of("error", "Le produit a été modifié entretemps, rechargez"));
+        }
+    }
+
+    private static String etagOf(Product p) {
+        return "\"" + p.getVersion() + "\"";
+    }
+
+    private static Integer parseEtag(String raw) {
+        // Accepte "12" et W/"12"
+        String s = raw.trim();
+        if (s.startsWith("W/")) s = s.substring(2).trim();
+        if (s.startsWith("\"") && s.endsWith("\"") && s.length() >= 2) {
+            s = s.substring(1, s.length() - 1);
+        }
+        try { return Integer.parseInt(s); } catch (NumberFormatException e) { return null; }
     }
 
     @DeleteMapping("/{id}")

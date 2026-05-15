@@ -2,9 +2,12 @@ package com.kidzpos.web;
 
 import com.kidzpos.domain.*;
 import com.kidzpos.dto.Dtos.*;
+import com.kidzpos.observability.BusinessMetrics;
 import com.kidzpos.repo.*;
 import com.kidzpos.security.JwtAuthFilter.AuthPrincipal;
 import jakarta.validation.Valid;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -20,6 +23,8 @@ import java.util.UUID;
 @RequestMapping("/api/sales")
 public class SaleController {
 
+    private static final Logger log = LoggerFactory.getLogger(SaleController.class);
+
     /** Retry sur collision uk_sale_store_seq (concurrence checkout/refund parallèle). */
     private static final int SEQ_RETRY_MAX = 5;
 
@@ -29,21 +34,38 @@ public class SaleController {
     private final SettingsRepository settingsRepo;
     private final StockMovementRepository moves;
     private final com.kidzpos.events.EventBus bus;
+    private final BusinessMetrics metrics;
     private final TransactionTemplate tx;
 
     public SaleController(SaleRepository sales, ProductRepository products,
                           CustomerRepository customers, SettingsRepository settingsRepo,
                           StockMovementRepository moves, com.kidzpos.events.EventBus bus,
+                          BusinessMetrics metrics,
                           PlatformTransactionManager txm) {
         this.sales = sales; this.products = products;
         this.customers = customers; this.settingsRepo = settingsRepo;
-        this.moves = moves; this.bus = bus;
+        this.moves = moves; this.bus = bus; this.metrics = metrics;
         this.tx = new TransactionTemplate(txm);
     }
 
+    /**
+     * Listing des ventes. Rétrocompat : si `page` non fourni → renvoie TOUTES les ventes
+     * (comportement historique, consommé par syncBackend). Sinon → Spring Page<Sale> avec
+     * tri date DESC déjà appliqué côté repo. Le client paginé peut lire `content` + `totalElements`.
+     */
     @GetMapping
-    public List<Sale> list(@RequestParam(required = false) String storeId) {
-        return storeId == null ? sales.findAllByOrderByDateDesc() : sales.findByStoreIdOrderByDateDesc(storeId);
+    public Object list(@RequestParam(required = false) String storeId,
+                       @RequestParam(required = false) Integer page,
+                       @RequestParam(required = false, defaultValue = "50") Integer size) {
+        if (page == null) {
+            return storeId == null
+                    ? sales.findAllByOrderByDateDesc()
+                    : sales.findByStoreIdOrderByDateDesc(storeId);
+        }
+        var pageable = org.springframework.data.domain.PageRequest.of(Math.max(0, page), Math.min(500, Math.max(1, size)));
+        return storeId == null
+                ? sales.findAllByOrderByDateDesc(pageable)
+                : sales.findByStoreIdOrderByDateDesc(storeId, pageable);
     }
 
     @GetMapping("/{id}")
@@ -57,7 +79,11 @@ public class SaleController {
         // (cas du replay outbox après reconnexion), renvoyer la vente existante.
         if (req.clientSaleId() != null && !req.clientSaleId().isBlank()) {
             var existing = sales.findById(req.clientSaleId());
-            if (existing.isPresent()) return ResponseEntity.ok(existing.get());
+            if (existing.isPresent()) {
+                metrics.saleIdempotentReplay.increment();
+                log.info("Idempotent sale replay absorbed: clientSaleId={}", req.clientSaleId());
+                return ResponseEntity.ok(existing.get());
+            }
         }
         return runWithSeqRetry(() -> tx.execute(status -> doCheckout(req, me)));
     }
@@ -237,7 +263,9 @@ public class SaleController {
             try {
                 return op.get();
             } catch (DataIntegrityViolationException e) {
+                metrics.saleSeqRetry.increment();
                 if (attempt == SEQ_RETRY_MAX - 1) {
+                    log.warn("Sale seq retry exhausted after {} attempts", SEQ_RETRY_MAX);
                     return ResponseEntity.status(409).body(Map.of("error", "Conflit numérotation, réessayez"));
                 }
                 // retry : la prochaine itération relit MAX(seq) dans une nouvelle transaction

@@ -217,3 +217,67 @@ Bouton "Rafraîchir le taux" → essaie le backend, sinon le navigateur, sinon m
 
 - **PostgreSQL** : `pg_dump kidzpos > backup.sql` (cron quotidien recommandé)
 - **Frontend** : Paramètres → "Exporter JSON" (sauvegarde locale du poste)
+
+---
+
+## 8. Tests d'intégration (TestContainers)
+
+Les tests `src/test/java/com/kidzpos/**` valident les invariants critiques contre
+un PostgreSQL réel démarré à la volée via TestContainers.
+
+**Prérequis** : Docker en cours d'exécution (`docker info` doit répondre).
+
+```bash
+# Depuis backend/
+mvn verify                                 # tous les tests + checks
+mvn test -Dtest=IdempotentReplayTest       # un seul test
+mvn test -Dtest='*Concurrent*'             # par pattern
+```
+
+Première exécution : Maven télécharge l'image `postgres:15-alpine` (~80 Mo).
+Le container est réutilisé entre classes de test → ~5–10s/test après warm-up.
+
+**Cas couverts** :
+- `ConcurrentCheckoutTest` — 8 caisses simultanées sur stock=1 → 1 seule vente réussit.
+- `IdempotentReplayTest` — double POST adjust/transfer avec même `clientMovementId` → 1 seule application.
+- `RefundConcurrencyTest` — 4 refunds simultanés sur la même vente → 1 seul refund créé.
+
+En CI (`.github/workflows/ci.yml`), Docker est natif sur `ubuntu-latest` — aucun
+setup additionnel n'est requis. Les tests bloquent la fusion sur 4xx/5xx.
+
+---
+
+## 9. Observabilité (Prometheus)
+
+Endpoint exposé sans auth pour scraping :
+
+```bash
+curl http://localhost:8080/actuator/prometheus
+```
+
+**Métriques métier custom** :
+
+| Métrique | Sens |
+|---|---|
+| `kidzpos_stock_idempotent_replay_total` | Replays outbox absorbés (santé de la déduplication stock) |
+| `kidzpos_sale_idempotent_replay_total` | Replays de checkout absorbés (idempotence `clientSaleId`) |
+| `kidzpos_sale_seq_retry_total` | Collisions sur `uk_sale_store_seq` sous concurrence |
+| `kidzpos_optimistic_lock_conflict_total` | Edits produit rejetés (412) faute d'`If-Match` à jour |
+
+Plus toutes les métriques natives Spring Boot (`http_server_requests_seconds`,
+JVM, HikariCP). À scraper depuis Prometheus :
+
+```yaml
+scrape_configs:
+  - job_name: kidzpos
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ['kidzpos-backend:8080']
+```
+
+⚠️ **Sécurité** : l'endpoint est `permitAll` côté SecurityConfig (EventSource-style
+scraping). En prod publique, restreindre au CIDR du scraper via reverse-proxy.
+
+**Logs structurés** : chaque ligne porte `[correlationId] [userId/storeId]` injecté
+par `CorrelationIdFilter`. Le client peut passer un `X-Request-Id` pour tracer
+de bout en bout — le backend le renvoie en réponse.

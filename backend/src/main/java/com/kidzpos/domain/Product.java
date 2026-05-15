@@ -28,4 +28,12 @@ public class Product {
     @Column(nullable = false) private Instant createdAt;
 
     @Column(name = "deleted_at") private Instant deletedAt;
+
+    /** Optimistic locking : Hibernate incrémente à chaque flush, lève
+     *  ObjectOptimisticLockingFailureException si la valeur attendue diverge.
+     *  Exposé en ETag sur GET, attendu en If-Match au PUT. */
+    @jakarta.persistence.Version
+    @Column(nullable = false)
+    @Builder.Default
+    private Integer version = 0;
 }

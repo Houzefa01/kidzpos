@@ -42,10 +42,15 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        # prometheus exposé pour scraping ; metrics utile pour debug ; health pour LB.
+        include: health,info,metrics,prometheus
   endpoint:
     health:
       show-details: never
+  prometheus:
+    metrics:
+      export:
+        enabled: true
 
 logging:
   level:

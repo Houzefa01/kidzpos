@@ -19,7 +19,7 @@ import { api as defaultApi } from "@/lib/apiClient";
 import { useBackend } from "@/store/backend";
 import { useFailedReplays } from "@/store/failedReplays";
 import { tokenStore } from "@/lib/apiClient";
-import { drainLatencySamples } from "@/lib/syncService";
+import { drainLatencySamples, drainReplayStats } from "@/lib/syncService";
 
 export interface ReporterDeps {
   api?: typeof defaultApi;
@@ -32,15 +32,24 @@ interface Snapshot {
   outboxSize: number;
   failedReplaysCount: number;
   syncLatencyMs: number[];
+  // P4 — compteurs de replay contrôlé. Optionnels (le backend les ignore si
+  // absents, cf FrontendMetricsReq côté DTO).
+  replayBatchSize?: number;
+  replayThrottleDelayMs?: number;
+  replayBackoffRetries?: number;
 }
 
 const DEFAULT_INTERVAL_MS = 30_000;
 
 function defaultSnapshot(): Snapshot {
+  const stats = drainReplayStats();
   return {
     outboxSize: useBackend.getState().pendingCount,
     failedReplaysCount: useFailedReplays.getState().failures.length,
     syncLatencyMs: drainLatencySamples(),
+    replayBatchSize: stats.batchSize,
+    replayThrottleDelayMs: stats.throttleDelayMs,
+    replayBackoffRetries: stats.backoffRetries,
   };
 }
 

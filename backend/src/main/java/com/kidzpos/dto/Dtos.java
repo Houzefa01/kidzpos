@@ -87,10 +87,18 @@ public class Dtos {
      * Snapshot métriques offline-first envoyé périodiquement par chaque caisse.
      * Borne dure 100 samples / requête (sanity-check anti-flood ; valeurs hors
      * borne sont filtrées côté serveur, pas rejetées).
+     *
+     * P4 — Les 3 derniers champs sont des deltas cumulés depuis le précédent
+     * POST réussi (reset côté client après ack). Optionnels : un client P3
+     * sans ces champs reste accepté ; les Counters Prometheus ne sont juste
+     * pas incrémentés pour ce report.
      */
     public record FrontendMetricsReq(
             @PositiveOrZero int outboxSize,
             @PositiveOrZero int failedReplaysCount,
-            List<@PositiveOrZero @DecimalMax("3600000") Double> syncLatencyMs
+            List<@PositiveOrZero @DecimalMax("3600000") Double> syncLatencyMs,
+            @PositiveOrZero Long replayBatchSize,
+            @PositiveOrZero Long replayThrottleDelayMs,
+            @PositiveOrZero Long replayBackoffRetries
     ) {}
 }

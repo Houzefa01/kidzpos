@@ -1,6 +1,7 @@
 package com.kidzpos.observability;
 
 import com.kidzpos.dto.Dtos.FrontendMetricsReq;
+import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.DistributionSummary;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -38,6 +39,9 @@ public class FrontendMetricsCollector {
 
     private final Map<String, Snapshot> snapshots = new ConcurrentHashMap<>();
     private final DistributionSummary syncLatency;
+    private final Counter replayBatchSize;
+    private final Counter replayThrottleDelayMs;
+    private final Counter replayBackoffRetries;
     private final Clock clock;
 
     public FrontendMetricsCollector(MeterRegistry registry) {
@@ -62,6 +66,19 @@ public class FrontendMetricsCollector {
         Gauge.builder("kidzpos.frontend.reporting_cashiers", this, FrontendMetricsCollector::activeCashierCount)
                 .description("Nombre de caisses ayant reporté dans les " + STALE_AFTER.toMinutes() + " dernières minutes")
                 .register(registry);
+
+        // P4 — Counters cumulés (deltas envoyés par le client). Aucun label
+        // dynamique : un time-series global pour toute la flotte.
+        this.replayBatchSize = Counter.builder("kidzpos.frontend.replay_batch_size")
+                .description("Nombre cumulé d'entrées outbox replay-traitées par batch (succès + 4xx)")
+                .register(registry);
+        this.replayThrottleDelayMs = Counter.builder("kidzpos.frontend.replay_throttle_delay_ms")
+                .description("Cumul des ms d'attente du throttle client (anti-burst)")
+                .baseUnit("milliseconds")
+                .register(registry);
+        this.replayBackoffRetries = Counter.builder("kidzpos.frontend.replay_backoff_retries")
+                .description("Nombre de drains de l'outbox interrompus par 5xx/réseau (déclenchant un backoff)")
+                .register(registry);
     }
 
     public void record(String userId, FrontendMetricsReq req) {
@@ -79,9 +96,22 @@ public class FrontendMetricsCollector {
                 }
             }
         }
-        log.debug("Frontend metrics recorded: userId={} outbox={} failed={} samples={}",
+
+        // P4 — Counters cumulés. Les champs sont optionnels (clients P3 → null).
+        if (req.replayBatchSize() != null && req.replayBatchSize() > 0) {
+            replayBatchSize.increment(req.replayBatchSize());
+        }
+        if (req.replayThrottleDelayMs() != null && req.replayThrottleDelayMs() > 0) {
+            replayThrottleDelayMs.increment(req.replayThrottleDelayMs());
+        }
+        if (req.replayBackoffRetries() != null && req.replayBackoffRetries() > 0) {
+            replayBackoffRetries.increment(req.replayBackoffRetries());
+        }
+
+        log.debug("Frontend metrics recorded: userId={} outbox={} failed={} samples={} batch={} throttleMs={} backoff={}",
                 userId, req.outboxSize(), req.failedReplaysCount(),
-                req.syncLatencyMs() == null ? 0 : req.syncLatencyMs().size());
+                req.syncLatencyMs() == null ? 0 : req.syncLatencyMs().size(),
+                req.replayBatchSize(), req.replayThrottleDelayMs(), req.replayBackoffRetries());
     }
 
     // ── Gauge suppliers ──────────────────────────────────────────────────────

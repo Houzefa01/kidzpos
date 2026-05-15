@@ -24,8 +24,8 @@ class FrontendMetricsCollectorTest {
         SimpleMeterRegistry reg = new SimpleMeterRegistry();
         var c = new FrontendMetricsCollector(reg);
 
-        c.record("u1", new FrontendMetricsReq(3, 1, List.of(100.0, 200.0)));
-        c.record("u2", new FrontendMetricsReq(5, 0, List.of(50.0)));
+        c.record("u1", new FrontendMetricsReq(3, 1, List.of(100.0, 200.0), null, null, null));
+        c.record("u2", new FrontendMetricsReq(5, 0, List.of(50.0), null, null, null));
 
         assertThat(reg.find("kidzpos.frontend.outbox_size").gauge().value()).isEqualTo(8.0);
         assertThat(reg.find("kidzpos.frontend.failed_replays").gauge().value()).isEqualTo(1.0);
@@ -41,8 +41,8 @@ class FrontendMetricsCollectorTest {
         SimpleMeterRegistry reg = new SimpleMeterRegistry();
         var c = new FrontendMetricsCollector(reg);
 
-        c.record("u1", new FrontendMetricsReq(10, 2, List.of()));
-        c.record("u1", new FrontendMetricsReq(3, 0, List.of()));  // queue vidée
+        c.record("u1", new FrontendMetricsReq(10, 2, List.of(), null, null, null));
+        c.record("u1", new FrontendMetricsReq(3, 0, List.of(), null, null, null));  // queue vidée
 
         // Le gauge prend la VALEUR ACTUELLE (la plus récente), pas la somme.
         assertThat(reg.find("kidzpos.frontend.outbox_size").gauge().value()).isEqualTo(3.0);
@@ -57,13 +57,13 @@ class FrontendMetricsCollectorTest {
         var c = new FrontendMetricsCollector(reg, mutableNow);
 
         // u1 reporte à 10:00 avec outbox=10
-        c.record("u1", new FrontendMetricsReq(10, 0, List.of()));
+        c.record("u1", new FrontendMetricsReq(10, 0, List.of(), null, null, null));
         assertThat(reg.find("kidzpos.frontend.outbox_size").gauge().value()).isEqualTo(10.0);
         assertThat(reg.find("kidzpos.frontend.reporting_cashiers").gauge().value()).isEqualTo(1.0);
 
         // 6 min plus tard, u2 reporte (u1 n'a pas re-reporté → stale)
         mutableNow.advance(Duration.ofMinutes(6));
-        c.record("u2", new FrontendMetricsReq(3, 0, List.of()));
+        c.record("u2", new FrontendMetricsReq(3, 0, List.of(), null, null, null));
 
         // u1 est évincé : seul u2 compte
         assertThat(reg.find("kidzpos.frontend.outbox_size").gauge().value()).isEqualTo(3.0);
@@ -76,7 +76,7 @@ class FrontendMetricsCollectorTest {
         var c = new FrontendMetricsCollector(reg);
 
         // 1h00 = 3 600 000 ms (borne incluse), 1h01 = au-delà → filtré
-        c.record("u1", new FrontendMetricsReq(0, 0, List.of(100.0, 3_600_000.0, 3_700_000.0, -1.0)));
+        c.record("u1", new FrontendMetricsReq(0, 0, List.of(100.0, 3_600_000.0, 3_700_000.0, -1.0), null, null, null));
 
         var lat = reg.find("kidzpos.frontend.sync_latency_ms").summary();
         assertThat(lat.count()).isEqualTo(2);  // 100 et 3.6M acceptés
@@ -88,8 +88,8 @@ class FrontendMetricsCollectorTest {
         SimpleMeterRegistry reg = new SimpleMeterRegistry();
         var c = new FrontendMetricsCollector(reg);
 
-        c.record("u1", new FrontendMetricsReq(0, 0, List.of()));
-        c.record("u2", new FrontendMetricsReq(0, 0, null));  // null tolérable
+        c.record("u1", new FrontendMetricsReq(0, 0, List.of(), null, null, null));
+        c.record("u2", new FrontendMetricsReq(0, 0, null, null, null, null));  // null tolérable
 
         assertThat(reg.find("kidzpos.frontend.sync_latency_ms").summary().count()).isEqualTo(0);
         assertThat(reg.find("kidzpos.frontend.reporting_cashiers").gauge().value()).isEqualTo(2.0);
@@ -100,12 +100,41 @@ class FrontendMetricsCollectorTest {
         SimpleMeterRegistry reg = new SimpleMeterRegistry();
         var c = new FrontendMetricsCollector(reg);
 
-        c.record(null, new FrontendMetricsReq(99, 99, List.of(99.0)));
-        c.record("", new FrontendMetricsReq(99, 99, List.of(99.0)));
-        c.record("   ", new FrontendMetricsReq(99, 99, List.of(99.0)));
+        c.record(null, new FrontendMetricsReq(99, 99, List.of(99.0), null, null, null));
+        c.record("", new FrontendMetricsReq(99, 99, List.of(99.0), null, null, null));
+        c.record("   ", new FrontendMetricsReq(99, 99, List.of(99.0), null, null, null));
 
         assertThat(reg.find("kidzpos.frontend.reporting_cashiers").gauge().value()).isEqualTo(0.0);
         assertThat(reg.find("kidzpos.frontend.sync_latency_ms").summary().count()).isEqualTo(0);
+    }
+
+    @Test
+    void p4CountersIncrementedFromOptionalFields() {
+        SimpleMeterRegistry reg = new SimpleMeterRegistry();
+        var c = new FrontendMetricsCollector(reg);
+
+        // 1er report : 3 entrées batch, 250ms throttle, 1 backoff
+        c.record("u1", new FrontendMetricsReq(0, 0, List.of(), 3L, 250L, 1L));
+        // 2e report : 5 entrées batch, 100ms throttle, 0 backoff
+        c.record("u1", new FrontendMetricsReq(0, 0, List.of(), 5L, 100L, 0L));
+
+        assertThat(reg.find("kidzpos.frontend.replay_batch_size").counter().count()).isEqualTo(8.0);
+        assertThat(reg.find("kidzpos.frontend.replay_throttle_delay_ms").counter().count()).isEqualTo(350.0);
+        assertThat(reg.find("kidzpos.frontend.replay_backoff_retries").counter().count()).isEqualTo(1.0);
+    }
+
+    @Test
+    void p4CountersIgnoreNullAndZeroFields() {
+        SimpleMeterRegistry reg = new SimpleMeterRegistry();
+        var c = new FrontendMetricsCollector(reg);
+
+        // Client P3 (sans champs P4) → counters restent à 0
+        c.record("u1", new FrontendMetricsReq(0, 0, List.of(), null, null, null));
+        c.record("u2", new FrontendMetricsReq(0, 0, List.of(), 0L, 0L, 0L));
+
+        assertThat(reg.find("kidzpos.frontend.replay_batch_size").counter().count()).isEqualTo(0.0);
+        assertThat(reg.find("kidzpos.frontend.replay_throttle_delay_ms").counter().count()).isEqualTo(0.0);
+        assertThat(reg.find("kidzpos.frontend.replay_backoff_retries").counter().count()).isEqualTo(0.0);
     }
 
     // ── helper : Clock mutable pour tester le TTL ───────────────────────────

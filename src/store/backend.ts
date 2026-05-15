@@ -1,7 +1,8 @@
 import { create } from "zustand";
 import { pingBackend } from "@/lib/apiClient";
-import { flushOutbox, outbox } from "@/lib/outbox";
+import { outbox } from "@/lib/outbox";
 import { startSse, stopSse, isSseOpen } from "@/lib/sse";
+import { syncService } from "@/lib/syncService";
 
 interface BackendState {
   lanReachable: boolean;
@@ -37,7 +38,7 @@ export const useBackend = create<BackendState>((set, get) => ({
       }
     }
     if (ok && outbox.size() > 0) {
-      const { sent } = await flushOutbox();
+      const { sent } = await syncService.replay();
       if (sent > 0) set({ lastSync: Date.now() });
     }
     set({ pendingCount: outbox.size() });
@@ -97,54 +98,21 @@ export function startBackendWatcher() {
   };
 }
 
-import { api } from "@/lib/apiClient";
-
 /**
- * Endpoints qui peuvent transporter un password en clair (création / update user).
- * On REFUSE la mise en outbox pour ces appels : localStorage est lisible par toute
- * extension/XSS, et le password traînerait en clair jusqu'au prochain flush.
- * DELETE /api/users n'est pas concerné (pas de body sensible).
+ * Wrapper de compatibilité — délègue à syncService.submit (P1 anti-corruption layer).
+ *
+ * Conservé pour ne pas casser les 24 call-sites existants dans les stores. Toute
+ * nouvelle mutation devrait appeler directement `syncService.submit({...})` qui
+ * accepte aussi `sensitive: true` en override explicite.
+ *
+ * La logique (offline → outbox, online → api → fallback outbox ou refus sensible,
+ * détection sensitive via regex /api/users) vit désormais dans syncService.ts.
  */
-function isSensitiveAuthMutation(path: string, method: string): boolean {
-  if (method !== "POST" && method !== "PUT") return false;
-  return /^\/api\/users(\/|$)/.test(path);
-}
-
 export async function pushMutation(
   path: string,
   method: "POST" | "PUT" | "PATCH" | "DELETE",
   body?: unknown,
-  ref?: string
+  ref?: string,
 ) {
-  const { lanReachable } = useBackend.getState();
-  const sensitive = isSensitiveAuthMutation(path, method);
-
-  if (!lanReachable) {
-    if (sensitive) {
-      return { queued: false, error: "Connexion serveur requise pour cette opération" };
-    }
-    outbox.enqueue({ path, method, body, ref });
-    useBackend.getState().refreshPending();
-    return { queued: true };
-  }
-  try {
-    await api(path, { method, body, timeoutMs: 8000 }); // 8s pour les mutations
-    return { queued: false };
-  } catch (err: unknown) {
-    const apiErr = err instanceof Error ? err : null;
-    const status = (err as { status?: number })?.status;
-    if (status && status >= 400 && status < 500) {
-      return { queued: false, error: apiErr?.message };
-    }
-    // 5xx / timeout : on bascule lanReachable=false dans tous les cas. Mais pour
-    // les mutations sensibles on REFUSE l'enqueue → aucun password en clair n'atterrit
-    // jamais dans localStorage. L'opérateur devra réessayer manuellement à la reprise.
-    useBackend.getState().setLan(false);
-    if (sensitive) {
-      return { queued: false, error: "Échec serveur — opération sensible non enregistrée, recommencez" };
-    }
-    outbox.enqueue({ path, method, body, ref });
-    useBackend.getState().refreshPending();
-    return { queued: true };
-  }
+  return syncService.submit({ path, method, body, ref });
 }

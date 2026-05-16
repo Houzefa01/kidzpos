@@ -1,0 +1,175 @@
+# ops/prometheus/alerts.yml — Règles d'alerte KidzPOS.
+#
+# Chaque alerte a :
+#   severity   : critical (P0, réveil opérateur) | warning (P1, mail/groupé)
+#   summary    : titre court visible dans Alertmanager
+#   description: contexte + runbook path
+#
+# Convention : runbook_url pointe vers /ops/runbooks/<nom>.md
+
+groups:
+  - name: kidzpos.availability
+    rules:
+      - alert: BackendDown
+        expr: up{job="kidzpos-backend"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Backend KidzPOS injoignable depuis 2 min"
+          description: |
+            Le scrape /actuator/prometheus échoue. Caisses passent en mode offline,
+            ventes enfilées dans l'outbox local. Vérifier process Java + DB.
+          runbook_url: "file:///ops/runbooks/incident_backend_down.md"
+
+      - alert: DBDown
+        expr: pg_up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "PostgreSQL injoignable depuis 1 min"
+          description: |
+            postgres-exporter n'arrive plus à se connecter. Le backend est probablement
+            en train de cascade-fail. Vérifier service postgres + disque + connexion réseau.
+          runbook_url: "file:///ops/runbooks/incident_backend_down.md"
+
+      - alert: PrometheusTargetMissing
+        expr: up == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Cible Prometheus {{ $labels.instance }} ({{ $labels.job }}) absente"
+          description: "Pas de scrape réussi depuis 5 min — vérifier service ou réseau."
+
+  - name: kidzpos.quality
+    rules:
+      - alert: HighBackend5xxRate
+        expr: |
+          (
+            sum(rate(http_server_requests_seconds_count{job="kidzpos-backend",status=~"5.."}[5m]))
+            /
+            sum(rate(http_server_requests_seconds_count{job="kidzpos-backend"}[5m]))
+          ) > 0.05
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Taux d'erreurs 5xx > 5% sur 5 min"
+          description: |
+            Le backend renvoie >5% d'erreurs serveur. Les caisses entrent en DEGRADED.
+            Vérifier logs Spring + santé DB + ressources host.
+
+      - alert: HighLatencyP95
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le) (rate(http_server_requests_seconds_bucket{job="kidzpos-backend"}[5m]))
+          ) > 1.5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Latence p95 > 1.5s sur 5 min"
+          description: |
+            Le backend ralentit. Si soutenu, déclenche DEGRADED côté caisses (rps=2, batch=1).
+            Vérifier DB locks + GC pause + saturation CPU.
+
+  - name: kidzpos.business
+    rules:
+      - alert: OutboxSaturation
+        expr: kidzpos_frontend_outbox_size > 8000
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Outbox saturée (>8000) depuis 10 min"
+          description: |
+            Au moins une caisse approche le HARD_LIMIT 10000. Au-delà, le drain est
+            mis en pause et de nouvelles ventes risquent l'éviction FIFO à 12000.
+          runbook_url: "file:///ops/runbooks/outbox_saturation.md"
+
+      - alert: FailedReplaysRising
+        expr: kidzpos_frontend_failed_replays > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Mutations rejetées (4xx) en attente d'acquittement"
+          description: |
+            Des mutations sont entrées dans failedReplays — l'opérateur doit consulter
+            le badge "N échec(s)" dans l'UI et acquitter/recommencer.
+
+      - alert: ReplayStuckInDegraded
+        expr: kidzpos_frontend_replay_mode_max == 2
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Replay en DEGRADED depuis 15 min"
+          description: |
+            Au moins une caisse n'arrive pas à sortir du mode dégradé. Backend instable
+            ou réseau saturé. Vérifier corrélation avec HighBackend5xxRate.
+
+      - alert: NoReportingCashier
+        expr: kidzpos_frontend_reporting_cashiers == 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Aucune caisse ne reporte depuis 15 min"
+          description: |
+            Soit toutes les caisses sont éteintes (heure de fermeture), soit problème
+            d'auth / réseau qui empêche /api/metrics/frontend. Vérifier business hours.
+
+  - name: kidzpos.security
+    rules:
+      - alert: RefreshTokenReuse
+        expr: increase(kidzpos_auth_refresh_reuse_detected_total[5m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "⚠ Refresh token réutilisé après révocation (vol suspecté)"
+          description: |
+            Un cookie refresh déjà révoqué a été présenté. Tous les tokens de l'user
+            ont été cascade-revoked. Vérifier logs `cascadedRevoke=N userId=...` et
+            considérer un reset password.
+
+      - alert: LoginRateLimited
+        expr: increase(kidzpos_login_rate_limited_total[5m]) > 5
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "5+ logins rate-limited en 5 min"
+          description: |
+            Possible bruteforce contre /api/auth/login. Identifier IP via logs
+            backend (filtre 429 dans access.log).
+
+      - alert: HighRefreshFailureRate
+        expr: |
+          (
+            rate(kidzpos_auth_refresh_failure_total[5m])
+            /
+            (rate(kidzpos_auth_refresh_success_total[5m]) + rate(kidzpos_auth_refresh_failure_total[5m]))
+          ) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: ">50% des refreshs échouent depuis 10 min"
+          description: |
+            Beaucoup de tentatives de refresh sans cookie ou cookie invalide.
+            Soit un client bugué soit une attaque. Inspecter les ip dans backend.log.
+
+      - alert: OptimisticLockConflictSpike
+        expr: increase(kidzpos_optimistic_lock_conflict_total[5m]) > 10
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "10+ conflits optimistic lock en 5 min"
+          description: |
+            Plusieurs caisses éditent les mêmes produits simultanément. Possible
+            problème de coordination ou comportement utilisateur inhabituel.

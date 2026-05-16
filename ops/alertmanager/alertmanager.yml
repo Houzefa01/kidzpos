@@ -1,0 +1,62 @@
+# Alertmanager — routage des alertes Prometheus.
+#
+# Stratégie :
+#   critical → notification immédiate (group_wait court, repeat 1h)
+#   warning  → groupé sur 5 min, repeat toutes les 4h
+#
+# Receivers :
+#   default      : log uniquement (visible via UI :9093)
+#   critical-sink: webhook local (à brancher sur le canal de votre choix —
+#                  Telegram / Slack / mail). Le placeholder écrit dans un
+#                  endpoint factice ; Alertmanager retiendra l'alerte en
+#                  mémoire et la montrera dans son UI même sans receiver actif.
+
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: default
+  group_by: ["alertname", "service"]
+  group_wait: 10s         # délai avant 1er fire — laisse le temps aux alertes liées de s'agréger
+  group_interval: 5m      # délai entre groupes d'une même alerte
+  repeat_interval: 4h     # rappel si toujours active
+
+  routes:
+    - matchers:
+        - severity = "critical"
+      receiver: critical-sink
+      group_wait: 5s
+      group_interval: 1m
+      repeat_interval: 1h
+      continue: true       # remonte aussi vers le receiver par défaut
+
+inhibit_rules:
+  # Si le backend est down, inutile de spammer les alertes de qualité
+  - source_matchers: [alertname="BackendDown"]
+    target_matchers: [severity="warning"]
+    equal: ["service"]
+
+receivers:
+  - name: default
+    # Pas de notification externe. Les alertes restent visibles dans UI :9093
+    # et l'historique reste interrogeable via l'API /api/v2/alerts.
+
+  - name: critical-sink
+    webhook_configs:
+      # PLACEHOLDER. À adapter selon canal d'astreinte.
+      # Exemples concrets :
+      #   - bot Telegram   : https://api.telegram.org/bot<TOKEN>/sendMessage?chat_id=<CHAT>
+      #   - Slack incoming : https://hooks.slack.com/services/...
+      #   - serveur local  : http://host.docker.internal:8081/alert
+      - url: "http://host.docker.internal:8081/alert"
+        send_resolved: true
+        max_alerts: 0   # pas de cap
+
+    # Si on préfère email, décommenter ci-dessous et configurer smtp_* en global :
+    # email_configs:
+    #   - to: "ops@example.com"
+    #     from: "alertmanager@kidzpos.local"
+    #     smarthost: "smtp.example.com:587"
+    #     auth_username: "alertmanager"
+    #     auth_password: "${SMTP_PASS}"
+    #     require_tls: true

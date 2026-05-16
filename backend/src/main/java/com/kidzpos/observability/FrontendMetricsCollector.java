@@ -7,6 +7,7 @@ import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.time.Clock;
@@ -47,11 +48,13 @@ public class FrontendMetricsCollector {
     private final Map<String, AdaptiveSnapshot> adaptive = new ConcurrentHashMap<>();
     private final Clock clock;
 
+    @Autowired
     public FrontendMetricsCollector(MeterRegistry registry) {
         this(registry, Clock.systemUTC());
     }
 
-    /** Constructor exposé pour les tests : permet d'injecter un Clock fixed. */
+    /** Constructor exposé pour les tests : permet d'injecter un Clock fixed.
+     *  Pas annoté @Autowired → Spring ne le considère pas pour l'injection. */
     public FrontendMetricsCollector(MeterRegistry registry, Clock clock) {
         this.clock = clock;
         this.syncLatency = DistributionSummary.builder("kidzpos.frontend.sync_latency_ms")

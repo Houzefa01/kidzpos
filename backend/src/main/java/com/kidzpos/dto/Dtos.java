@@ -99,6 +99,12 @@ public class Dtos {
             List<@PositiveOrZero @DecimalMax("3600000") Double> syncLatencyMs,
             @PositiveOrZero Long replayBatchSize,
             @PositiveOrZero Long replayThrottleDelayMs,
-            @PositiveOrZero Long replayBackoffRetries
+            @PositiveOrZero Long replayBackoffRetries,
+            // P5 — État du replay adaptatif (gauges agrégés via aggregator collector).
+            // Tous optionnels : un client P4 sans ces champs reste accepté.
+            String replayMode,                         // "NORMAL" | "DEGRADED" | "RECOVERY"
+            @PositiveOrZero Double replayAdaptiveRps,  // RPS effectif côté client
+            @PositiveOrZero Integer replayAdaptiveBatchSize,
+            @PositiveOrZero Long replayDegradedEntriesTotal
     ) {}
 }

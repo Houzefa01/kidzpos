@@ -37,6 +37,11 @@ interface Snapshot {
   replayBatchSize?: number;
   replayThrottleDelayMs?: number;
   replayBackoffRetries?: number;
+  // P5 — état du replay adaptatif self-healing.
+  replayMode?: "NORMAL" | "DEGRADED" | "RECOVERY";
+  replayAdaptiveRps?: number;
+  replayAdaptiveBatchSize?: number;
+  replayDegradedEntriesTotal?: number;
 }
 
 const DEFAULT_INTERVAL_MS = 30_000;
@@ -50,6 +55,10 @@ function defaultSnapshot(): Snapshot {
     replayBatchSize: stats.batchSize,
     replayThrottleDelayMs: stats.throttleDelayMs,
     replayBackoffRetries: stats.backoffRetries,
+    replayMode: stats.mode,
+    replayAdaptiveRps: stats.currentRps,
+    replayAdaptiveBatchSize: stats.currentBatchSize,
+    replayDegradedEntriesTotal: stats.degradedEntriesTotal,
   };
 }
 

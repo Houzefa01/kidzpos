@@ -21,9 +21,11 @@ import { outbox } from "@/lib/outbox";
 import { useBackend } from "@/store/backend";
 import { useFailedReplays } from "@/store/failedReplays";
 import { toast } from "sonner";
-import { createBackoffPolicy } from "@/lib/sync/backoff";
 import { createThrottle } from "@/lib/sync/throttle";
-import { processBatches } from "@/lib/sync/replayBatch";
+import { createMetricsWindow } from "@/lib/sync/metricsWindow";
+import { createStateMachine, type ReplayMode } from "@/lib/sync/stateMachine";
+import { createBackoffScheduler } from "@/lib/sync/backoffScheduler";
+import { decide, smooth, DEFAULT_PARAMS, type ControllerParams } from "@/lib/sync/replayController";
 
 export type HttpMethod = "POST" | "PUT" | "PATCH" | "DELETE";
 
@@ -144,87 +146,145 @@ const defaultTransport: Transport = {
   },
 
   /**
-   * P4 — Replay contrôlé.
+   * P5 — Replay adaptatif self-healing.
    *
-   *   • Batching        : tranche en lots de BATCH_SIZE, pause BATCH_PAUSE_MS
-   *                       entre lots pour laisser respirer le backend.
-   *   • Throttling      : THROTTLE_RPS req/s max (≃ 5/s par défaut) — élimine
-   *                       les bursts au reconnect.
-   *   • Backoff         : si un drain finit sur 5xx/réseau, on note l'échec
-   *                       et le PROCHAIN appel à drainQueue (déclenché par
-   *                       backend.pulse) est court-circuité tant que
-   *                       `nextDrainAt` n'est pas atteint. Exponentiel +
-   *                       jitter ±20 %, capé à 30 s.
-   *   • Overflow guard  : si outbox > MAX_QUEUE_SIZE (5000), on PAUSE le
-   *                       drain et on dépose UNE entrée synthétique dans
-   *                       failedReplays (visible dans l'UI existante) à la
-   *                       transition. Reset quand la file redescend.
+   *   • Per-item backoff isolation : chaque entry porte `failureCount` +
+   *     `nextEligibleAt`. Un échec n'arrête PAS le drain ; l'item est
+   *     replanifié individuellement. Les autres continuent.
+   *   • State machine NORMAL/DEGRADED/RECOVERY pilote rps + batchSize +
+   *     pauseMs. Transitions déterministes basées sur la sliding window.
+   *   • Adaptive controller : decide() produit la consigne ; smooth() lisse
+   *     les transitions (±1 RPS, ±5 batch par tick).
+   *   • Overflow soft/hard : SOFT_LIMIT 3000 → bump du débit ;
+   *     HARD_LIMIT 10000 → PAUSE + notification synthétique unique.
+   *   • Dead letter : un item dépassant MAX_PER_ITEM_ATTEMPTS attempts
+   *     est déplacé vers failedReplays (anti-starvation : la file ne
+   *     croît pas indéfiniment d'items chroniquement défaillants).
    *
-   * Le contrat extérieur est préservé : Promise<{sent, failed}> ; verrou
-   * réentrance ; ordre FIFO strict ; 4xx → failedReplays + toast (inchangé).
+   * Contrat extérieur préservé : Promise<{sent, failed}> ; verrou réentrance.
+   * FIFO préservée pour les items first-try success ; items réessayés
+   * peuvent être re-séquencés (per-item isolation > strict global FIFO).
    */
   async drainQueue() {
     if (drainingRef.value) return { sent: 0, failed: 0 };
 
-    // Backoff : si le précédent drain a échoué, on attend la fenêtre.
-    if (Date.now() < nextDrainAt) {
-      return { sent: 0, failed: 0 };
-    }
+    const totalSize = outbox.size();
 
-    // Overflow guard : on ne tente pas de drainer une file gigantesque
-    // (signe que le backend est durablement KO ou que le client génère trop).
-    const size = outbox.size();
-    if (size > MAX_QUEUE_SIZE) {
-      notifyOverflowOnce(size);
+    // Hard limit : signal critique, on n'essaie même pas (back pressure).
+    if (totalSize > HARD_LIMIT) {
+      notifyOverflowOnce(totalSize);
       return { sent: 0, failed: 0 };
     }
-    // Sortie de l'overflow → on autorise les nouvelles notifications.
     clearOverflowNotification();
 
     drainingRef.value = true;
     try {
-      const result = await processBatches({
-        outboxList: () => outbox.list(),
-        outboxRemove: (id) => outbox.remove(id),
-        apiSend: (e) => api(e.path, { method: e.method, body: e.body, timeoutMs: 5000 }),
-        onSuccess: (e) => {
-          recordLatencySample(Date.now() - e.ts);
-          batchItemsProcessed++;
-        },
-        onFailure4xx: (e, err) => {
-          const body = (err as ApiError).body as { error?: string } | null;
-          const message = body?.error ?? err.message ?? `HTTP ${err.status}`;
-          useFailedReplays.getState().add({
-            ts: Date.now(),
-            path: e.path,
-            method: e.method,
-            body: e.body,
-            ref: e.ref,
-            status: err.status,
-            error: message,
-          });
-          toast.error(`Mutation rejetée (${err.status}) : ${message}`, { duration: 6000 });
-          batchItemsProcessed++;
-        },
-        on5xxOrNetwork: () => {
-          // Réseau HS / 5xx — on stoppe le drain. Le backoff prend le relai.
-        },
-        throttle: replayThrottle,
-        batchSize: BATCH_SIZE,
-        batchPauseMs: BATCH_PAUSE_MS,
+      // 1. Décide la consigne courante depuis stats + queue + mode.
+      const stats = metricsWindow.snapshot();
+      const target = decide({
+        mode: stateMachine.current(),
+        stats,
+        queueSize: totalSize,
+        softLimit: SOFT_LIMIT,
+        hardLimit: HARD_LIMIT,
       });
+      currentParams = smooth(currentParams, target);
+      replayThrottle.setRate(currentParams.rps);
 
-      // Mise à jour de la politique backoff selon le résultat du drain.
-      if (result.stoppedOnError) {
-        backoff.fail();
-        backoffRetries++;
-        nextDrainAt = Date.now() + backoff.nextDelayMs();
-      } else {
-        backoff.reset();
-        nextDrainAt = 0;
+      // 2. Filtre les items éligibles (nextEligibleAt absent ou passé).
+      //    On préserve l'ordre FIFO d'enqueue dans la sélection.
+      const now = Date.now();
+      const allEntries = outbox.list();
+      const eligible = allEntries.filter((e) => !e.nextEligibleAt || e.nextEligibleAt <= now);
+      if (eligible.length === 0) return { sent: 0, failed: 0 };
+
+      // 3. Drain par batches adaptatifs avec per-item retry.
+      let sent = 0;
+      let failed = 0;
+      const { batchSize, batchPauseMs } = currentParams;
+
+      for (let i = 0; i < eligible.length; i += batchSize) {
+        const batch = eligible.slice(i, i + batchSize);
+        for (const e of batch) {
+          await replayThrottle.acquire();
+          const start = Date.now();
+          try {
+            await api(e.path, { method: e.method, body: e.body, timeoutMs: 5000 });
+            outbox.remove(e.id);
+            sent++;
+            const latency = Date.now() - e.ts;
+            recordLatencySample(latency);
+            metricsWindow.recordSuccess(Date.now() - start);
+            batchItemsProcessed++;
+          } catch (err) {
+            if (err instanceof ApiError && err.status >= 400 && err.status < 500) {
+              // 4xx — erreur métier permanente. Notify + remove. Pas de retry.
+              const body = err.body as { error?: string } | null;
+              const message = body?.error ?? err.message ?? `HTTP ${err.status}`;
+              useFailedReplays.getState().add({
+                ts: Date.now(),
+                path: e.path,
+                method: e.method,
+                body: e.body,
+                ref: e.ref,
+                status: err.status,
+                error: message,
+              });
+              toast.error(`Mutation rejetée (${err.status}) : ${message}`, { duration: 6000 });
+              outbox.remove(e.id);
+              failed++;
+              metricsWindow.recordClientError();
+              batchItemsProcessed++;
+            } else {
+              // 5xx / réseau / timeout → backoff PER-ITEM. Le drain CONTINUE.
+              metricsWindow.recordNetworkFailure();
+              const newFailureCount = (e.failureCount ?? 0) + 1;
+              const errMsg = err instanceof Error ? err.message : "unknown";
+
+              if (newFailureCount >= backoffScheduler.maxAttempts) {
+                // Dead letter — empêche le starvation (item chroniquement KO).
+                useFailedReplays.getState().add({
+                  ts: Date.now(),
+                  path: e.path,
+                  method: e.method,
+                  body: e.body,
+                  ref: e.ref,
+                  status: 0,
+                  error: `Abandon après ${newFailureCount} échecs réseau : ${errMsg}`,
+                });
+                outbox.remove(e.id);
+                failed++;
+                batchItemsProcessed++;
+                deadLetterCount++;
+              } else {
+                // Replan individuel — l'item retentera au-delà de nextEligibleAt.
+                const delay = backoffScheduler.delayForFailureCount(newFailureCount);
+                outbox.update(e.id, {
+                  failureCount: newFailureCount,
+                  lastError: errMsg,
+                  nextEligibleAt: now + delay,
+                });
+                failed++;
+                perItemRetries++;
+              }
+            }
+          }
+        }
+        // Pause inter-lots — laisse respirer le backend.
+        if (i + batchSize < eligible.length) {
+          await new Promise<void>((resolve) => setTimeout(resolve, batchPauseMs));
+        }
       }
 
-      return { sent: result.sent, failed: result.failed };
+      // 4. Met à jour le state machine en fin de drain.
+      const transition = stateMachine.advance(metricsWindow.snapshot());
+      if (transition.changed && transition.to === "DEGRADED") {
+        // Mode dégradé : laisse une trace dans la console (pas de toast — UX).
+        // eslint-disable-next-line no-console
+        console.warn("[syncService] Replay entered DEGRADED mode (backend instable)");
+      }
+
+      return { sent, failed };
     } finally {
       drainingRef.value = false;
     }
@@ -237,53 +297,66 @@ const defaultTransport: Transport = {
 const drainingRef = { value: false };
 
 // ────────────────────────────────────────────────────────────────────────────
-// P4 — État interne du replay contrôlé (batch / throttle / backoff / overflow)
+// P5 — État interne du replay adaptatif self-healing
 // ────────────────────────────────────────────────────────────────────────────
 
-/** Taille d'un lot de drain. ~15 messages avant pause respiratoire. */
-const BATCH_SIZE = 15;
-/** Pause entre deux lots (ms). Pas trop long pour ne pas étirer un gros drain. */
-const BATCH_PAUSE_MS = 50;
-/** Throttle nominal : 5 req/s soutenu (≈ 200 ms entre deux fetchs). */
-const THROTTLE_RPS = 5;
-/** Plafond outbox : au-delà, on PAUSE le drain (signe de désastre réseau). */
-const MAX_QUEUE_SIZE = 5000;
+/** Soft limit : au-delà, le replayController augmente le débit. */
+const SOFT_LIMIT = 3000;
+/** Hard limit : au-delà, drainQueue se met en pause + notification. */
+const HARD_LIMIT = 10_000;
 
-const backoff = createBackoffPolicy({ baseDelayMs: 1000, maxDelayMs: 30_000, jitterPct: 0.2 });
-const replayThrottle = createThrottle({ maxRequestsPerSecond: THROTTLE_RPS });
+const replayThrottle = createThrottle({ maxRequestsPerSecond: DEFAULT_PARAMS.rps });
+const metricsWindow = createMetricsWindow({ capacity: 50 });
+const stateMachine = createStateMachine();
+const backoffScheduler = createBackoffScheduler({ baseDelayMs: 2000, maxDelayMs: 5 * 60_000 });
 
-/** Fenêtre temporelle : si non-nulle, drainQueue retourne immédiatement avant ce timestamp. */
-let nextDrainAt = 0;
+/** Consigne courante (mise à jour à chaque drainQueue via smooth()). */
+let currentParams: ControllerParams = { ...DEFAULT_PARAMS };
 
 /** Compteurs cumulés (deltas exposés au metricsReporter, reset() à chaque envoi). */
 let batchItemsProcessed = 0;
-let backoffRetries = 0;
+let perItemRetries = 0;
+let deadLetterCount = 0;
 
 /** Lecture-destructive : appelé par metricsReporter pour expédier les deltas. */
 export function drainReplayStats(): {
   batchSize: number;
   throttleDelayMs: number;
   backoffRetries: number;
+  mode: ReplayMode;
+  currentRps: number;
+  currentBatchSize: number;
+  degradedEntriesTotal: number;
 } {
   const out = {
     batchSize: batchItemsProcessed,
     throttleDelayMs: Math.round(replayThrottle.totalDelayMs()),
-    backoffRetries,
+    // perItemRetries est l'équivalent P5 de backoffRetries — mêmes sémantique
+    // côté Prometheus (nombre d'opérations qui ont déclenché un backoff).
+    backoffRetries: perItemRetries,
+    mode: stateMachine.current(),
+    currentRps: Math.round(replayThrottle.getRate() * 100) / 100,
+    currentBatchSize: currentParams.batchSize,
+    degradedEntriesTotal: stateMachine.degradedEntriesTotal(),
   };
   batchItemsProcessed = 0;
-  backoffRetries = 0;
+  perItemRetries = 0;
+  deadLetterCount = 0;
   replayThrottle.reset();
   return out;
 }
 
-/** Pour les tests : remet à zéro toute la machinerie P4. */
+/** Pour les tests : remet à zéro toute la machinerie P5. */
 export function __resetReplayStateForTests(): void {
   drainingRef.value = false;
-  backoff.reset();
   replayThrottle.reset();
-  nextDrainAt = 0;
+  replayThrottle.setRate(DEFAULT_PARAMS.rps);
+  metricsWindow.reset();
+  stateMachine.reset();
+  currentParams = { ...DEFAULT_PARAMS };
   batchItemsProcessed = 0;
-  backoffRetries = 0;
+  perItemRetries = 0;
+  deadLetterCount = 0;
   overflowNotified = false;
 }
 

@@ -18,6 +18,12 @@ export interface ThrottleController {
   totalDelayMs(): number;
   /** Reset le cumul (typiquement après envoi des metrics au backend). */
   reset(): void;
+  /** P5 — Modifie le débit nominal au runtime (RPS).
+   *  Pris en compte au prochain acquire() ; les acquisitions déjà en attente
+   *  conservent leur intervalle initial. Clampé à [0.1, ∞). */
+  setRate(rps: number): void;
+  /** P5 — RPS effectif actuel (lecture). */
+  getRate(): number;
 }
 
 export interface ThrottleOptions {
@@ -29,8 +35,8 @@ export interface ThrottleOptions {
 }
 
 export function createThrottle(opts: ThrottleOptions = {}): ThrottleController {
-  const rps = Math.max(0.1, opts.maxRequestsPerSecond ?? 5);
-  const minIntervalMs = 1000 / rps;
+  let currentRps = Math.max(0.1, opts.maxRequestsPerSecond ?? 5);
+  let minIntervalMs = 1000 / currentRps;
   const setTimeoutFn = opts.setTimeout ?? globalThis.setTimeout;
   const now = opts.now ?? Date.now;
 
@@ -64,5 +70,10 @@ export function createThrottle(opts: ThrottleOptions = {}): ThrottleController {
     },
     totalDelayMs() { return totalDelay; },
     reset() { totalDelay = 0; },
+    setRate(rps: number) {
+      currentRps = Math.max(0.1, rps);
+      minIntervalMs = 1000 / currentRps;
+    },
+    getRate() { return currentRps; },
   };
 }

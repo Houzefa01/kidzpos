@@ -70,36 +70,6 @@ describe("syncService.replay — P4 controlled replay", () => {
     expect(stats.batchSize).toBe(10);
   }, 10_000);
 
-  it("5xx au milieu → arrêt du drain, entrées restantes préservées", async () => {
-    const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
-    let call = 0;
-    fetchMock.mockImplementation(async () => {
-      call++;
-      // 1er et 2e OK, 3e → 503
-      if (call === 3) return jsonResponse(503, { error: "down" });
-      return jsonResponse(200);
-    });
-
-    for (let i = 0; i < 5; i++) {
-      outbox.enqueue({ path: `/api/y/${i}`, method: "POST", body: {} });
-    }
-
-    const { syncService } = await import("@/lib/syncService");
-    const r = await syncService.replay();
-
-    expect(r.sent).toBe(2);
-    expect(r.failed).toBe(1);
-    expect(outbox.size()).toBe(3); // 3 entrées restantes (l'entrée 503 + suivantes)
-
-    // Backoff activé : le prochain replay immédiat est court-circuité
-    const r2 = await syncService.replay();
-    expect(r2).toEqual({ sent: 0, failed: 0 });
-    expect(outbox.size()).toBe(3);
-    // Compteur backoff incrémenté
-    const stats = drainReplayStats();
-    expect(stats.backoffRetries).toBeGreaterThanOrEqual(1);
-  });
-
   it("4xx → entrée déplacée vers failedReplays + retirée de l'outbox", async () => {
     const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
     fetchMock.mockImplementation(async () => jsonResponse(400, { error: "stock négatif" }));
@@ -116,34 +86,7 @@ describe("syncService.replay — P4 controlled replay", () => {
     expect(failures[0].error).toBe("stock négatif");
   });
 
-  it("overflow > 5000 → drain pausé + UNE entrée synthétique failedReplays", async () => {
-    // On force l'outbox au-dessus du seuil sans appeler 5001× enqueue (lent)
-    const fakeList = Array.from({ length: 5001 }, (_, i) => ({
-      id: `id-${i}`,
-      ts: Date.now(),
-      path: `/api/z/${i}`,
-      method: "POST" as const,
-      body: {},
-      retries: 0,
-    }));
-    localStorage.setItem("kidzpos-outbox", JSON.stringify(fakeList));
-
-    const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
-    fetchMock.mockImplementation(async () => jsonResponse(200));
-
-    const { syncService } = await import("@/lib/syncService");
-    const r1 = await syncService.replay();
-
-    expect(r1).toEqual({ sent: 0, failed: 0 });
-    expect(fetchMock).not.toHaveBeenCalled();  // aucune requête réseau
-
-    const failures = useFailedReplays.getState().failures;
-    expect(failures).toHaveLength(1);
-    expect(failures[0].path).toBe("<replay-paused>");
-    expect(failures[0].error).toMatch(/saturée/);
-
-    // Second appel : pas de nouvelle entrée synthétique (transition false→true uniquement)
-    await syncService.replay();
-    expect(useFailedReplays.getState().failures).toHaveLength(1);
-  });
+  // Note : les tests 5xx-break et overflow > 5000 ont été retirés avec P5
+  // (per-item retry + HARD_LIMIT 10000). Leurs équivalents adaptés se trouvent
+  // dans syncAdaptive.test.ts.
 });

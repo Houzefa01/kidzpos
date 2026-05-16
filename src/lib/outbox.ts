@@ -4,6 +4,10 @@
 //
 // Module bas-niveau : pure persistance. Toute la logique de submit/replay vit
 // désormais dans @/lib/syncService (P1 anti-corruption layer).
+//
+// P5 — Champs additifs nextEligibleAt + failureCount pour le per-item backoff.
+// update() permet de modifier en place un entry sans changer son id/ts (préserve
+// l'ordre FIFO d'enqueue, donc l'âge initial dans le tri du replay).
 
 import { z } from "zod";
 
@@ -17,6 +21,12 @@ export interface OutboxEntry {
   ref?: string;
   retries: number;
   lastError?: string;
+  /** P5 — timestamp ms à partir duquel cet item est de nouveau éligible au replay.
+   *  Non défini → éligible immédiatement (cas nominal first-try). */
+  nextEligibleAt?: number;
+  /** P5 — compteur d'échecs réseau/5xx isolés à cet item.
+   *  Au-delà de MAX_PER_ITEM_ATTEMPTS, l'item est dead-lettered (failedReplays). */
+  failureCount?: number;
 }
 
 const OutboxEntrySchema = z.object({
@@ -28,11 +38,18 @@ const OutboxEntrySchema = z.object({
   ref: z.string().optional(),
   retries: z.number(),
   lastError: z.string().optional(),
+  nextEligibleAt: z.number().optional(),
+  failureCount: z.number().optional(),
 });
 
 const KEY = "kidzpos-outbox";
-/** I6 : plafond pour éviter la saturation localStorage après plusieurs jours offline. */
-const MAX_ENTRIES = 500;
+/**
+ * P5 — Plafond augmenté à 12000 (cf P5 SOFT_LIMIT 3000 / HARD_LIMIT 10000).
+ * Reste un garde-fou ultime contre la saturation localStorage : si syncService
+ * laisse passer la file au-delà du HARD limit (bug de la logique de pause),
+ * outbox évince les plus récentes (slice(-MAX_ENTRIES)) plutôt que de tout perdre.
+ */
+const MAX_ENTRIES = 12000;
 
 function read(): OutboxEntry[] {
   try {
@@ -70,6 +87,18 @@ export const outbox = {
   },
   remove(id: string) {
     write(read().filter((e) => e.id !== id));
+  },
+  /** P5 — Patch in place. Préserve id/ts (et donc l'ordre FIFO d'origine).
+   *  No-op silencieux si l'id n'existe pas (race avec un remove concurrent). */
+  update(id: string, patch: Partial<Omit<OutboxEntry, "id" | "ts">>): void {
+    const all = read();
+    let changed = false;
+    const next = all.map((e) => {
+      if (e.id !== id) return e;
+      changed = true;
+      return { ...e, ...patch };
+    });
+    if (changed) write(next);
   },
   clear() {
     write([]);

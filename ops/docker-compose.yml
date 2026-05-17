@@ -121,15 +121,21 @@ services:
     image: quay.io/prometheuscommunity/postgres-exporter:v0.15.0
     container_name: kidzpos-postgres-exporter
     restart: always
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    # network_mode: host est REQUIS quand Postgres écoute uniquement sur 127.0.0.1
+    # (cas par défaut Arch et configs sécurisées). Sinon l'exporter ne peut PAS
+    # joindre la DB via host.docker.internal (refusé car listen_addresses=localhost).
+    #
+    # Conséquence : port 9187 directement sur l'hôte, pas dans ops-net.
+    # Prometheus le scrape via host.docker.internal:9187 (cf prometheus.yml).
+    #
+    # ALTERNATIVE plus propre : modifier postgresql.conf →
+    #   listen_addresses = '*'
+    # + pg_hba.conf qui n'autorise que 172.17.0.0/16 → puis revenir au mode
+    # networks: [ops-net] classique. À privilégier si Postgres est managé
+    # via Docker aussi (déploiement multi-host).
+    network_mode: host
     environment:
-      # Le backend KidzPOS utilise par défaut postgres://kidzpos:kidzpos@localhost:5432/kidzpos
-      # Adapter via .env si différent. host.docker.internal = hôte depuis container.
-      DATA_SOURCE_NAME: "postgresql://${PG_USER:-kidzpos}:${PG_PASSWORD:-kidzpos}@host.docker.internal:${PG_PORT:-5432}/${PG_DB:-kidzpos}?sslmode=disable"
-    ports:
-      - "9187:9187"
-    networks: [ops-net]
+      DATA_SOURCE_NAME: "postgresql://${PG_USER:-kidzpos}:${PG_PASSWORD:-kidzpos}@127.0.0.1:${PG_PORT:-5432}/${PG_DB:-kidzpos}?sslmode=disable"
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:9187/metrics || exit 1"]
       interval: 30s

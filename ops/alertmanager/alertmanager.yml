@@ -1,15 +1,22 @@
 # Alertmanager — routage des alertes Prometheus.
 #
 # Stratégie :
-#   critical → notification immédiate (group_wait court, repeat 1h)
-#   warning  → groupé sur 5 min, repeat toutes les 4h
+#   critical → notification immédiate Telegram (group_wait court, repeat 1h)
+#   warning  → notification Telegram groupée (5 min, repeat 4h)
 #
-# Receivers :
-#   default      : log uniquement (visible via UI :9093)
-#   critical-sink: webhook local (à brancher sur le canal de votre choix —
-#                  Telegram / Slack / mail). Le placeholder écrit dans un
-#                  endpoint factice ; Alertmanager retiendra l'alerte en
-#                  mémoire et la montrera dans son UI même sans receiver actif.
+# Pipeline :
+#   Prometheus → POST /api/v2/alerts → Alertmanager
+#              → match route → POST webhook → alertmanager-bot:8080
+#              → Telegram API → opérateur(s) enregistrés via /start
+#
+# Setup requis (cf ops/README.md § Telegram setup) :
+#   1. ops/.env contient TELEGRAM_TOKEN et TELEGRAM_ADMIN
+#   2. Bot Telegram créé via @BotFather
+#   3. L'opérateur a envoyé /start au bot
+#
+# Sans setup Telegram : les alertes restent visibles dans UI :9093, l'historique
+# reste interrogeable via /api/v2/alerts — le système n'est jamais aveugle,
+# juste muet côté push notification.
 
 global:
   resolve_timeout: 5m
@@ -17,46 +24,41 @@ global:
 route:
   receiver: default
   group_by: ["alertname", "service"]
-  group_wait: 10s         # délai avant 1er fire — laisse le temps aux alertes liées de s'agréger
-  group_interval: 5m      # délai entre groupes d'une même alerte
-  repeat_interval: 4h     # rappel si toujours active
+  group_wait: 10s
+  group_interval: 5m
+  repeat_interval: 4h
 
   routes:
     - matchers:
         - severity = "critical"
-      receiver: critical-sink
+      receiver: telegram-critical
       group_wait: 5s
       group_interval: 1m
       repeat_interval: 1h
-      continue: true       # remonte aussi vers le receiver par défaut
+      continue: true
+    - matchers:
+        - severity = "warning"
+      receiver: telegram-warning
+      continue: true
 
 inhibit_rules:
-  # Si le backend est down, inutile de spammer les alertes de qualité
   - source_matchers: [alertname="BackendDown"]
     target_matchers: [severity="warning"]
     equal: ["service"]
 
 receivers:
   - name: default
-    # Pas de notification externe. Les alertes restent visibles dans UI :9093
-    # et l'historique reste interrogeable via l'API /api/v2/alerts.
+    # Pas de notification externe — fallback silencieux. Les alertes restent
+    # visibles dans UI :9093 et interrogeables via /api/v2/alerts.
 
-  - name: critical-sink
+  - name: telegram-critical
     webhook_configs:
-      # PLACEHOLDER. À adapter selon canal d'astreinte.
-      # Exemples concrets :
-      #   - bot Telegram   : https://api.telegram.org/bot<TOKEN>/sendMessage?chat_id=<CHAT>
-      #   - Slack incoming : https://hooks.slack.com/services/...
-      #   - serveur local  : http://host.docker.internal:8081/alert
-      - url: "http://host.docker.internal:8081/alert"
+      - url: "http://alertmanager-bot:8080"
         send_resolved: true
-        max_alerts: 0   # pas de cap
+        max_alerts: 0
 
-    # Si on préfère email, décommenter ci-dessous et configurer smtp_* en global :
-    # email_configs:
-    #   - to: "ops@example.com"
-    #     from: "alertmanager@kidzpos.local"
-    #     smarthost: "smtp.example.com:587"
-    #     auth_username: "alertmanager"
-    #     auth_password: "${SMTP_PASS}"
-    #     require_tls: true
+  - name: telegram-warning
+    webhook_configs:
+      - url: "http://alertmanager-bot:8080"
+        send_resolved: true
+        max_alerts: 0

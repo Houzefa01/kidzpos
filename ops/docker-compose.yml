@@ -20,6 +20,7 @@ volumes:
   prometheus_data:
   grafana_data:
   alertmanager_data:
+  alertmanager_bot_data:
 
 services:
   prometheus:
@@ -95,6 +96,40 @@ services:
     networks: [ops-net]
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:9093/-/healthy || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  alertmanager-bot:
+    # Pont Alertmanager → Telegram. Reçoit les webhooks d'Alertmanager,
+    # formate (template Go) et envoie au(x) chat(s) Telegram enregistré(s).
+    # Setup utilisateur :
+    #   1. Créer le bot via @BotFather  → TELEGRAM_TOKEN
+    #   2. Trouver son chat_id          → @userinfobot ou getUpdates API
+    #   3. Mettre TOKEN + ADMIN dans .env (cf ops/.env.example)
+    #   4. Lancer la stack, envoyer /start au bot depuis Telegram
+    image: metalmatze/alertmanager-bot:0.4.3
+    container_name: kidzpos-alertmanager-bot
+    restart: always
+    depends_on:
+      alertmanager:
+        condition: service_healthy
+    environment:
+      ALERTMANAGER_URL: "http://alertmanager:9093"
+      BOLT_PATH: "/data/bot.db"
+      STORE: "bolt"
+      TELEGRAM_ADMIN: "${TELEGRAM_ADMIN:?TELEGRAM_ADMIN required — chat_id de l\\'opérateur autorisé}"
+      TELEGRAM_TOKEN: "${TELEGRAM_TOKEN:?TELEGRAM_TOKEN required — get from @BotFather}"
+      LISTEN_ADDR: "0.0.0.0:8080"
+      # Templates : on utilise les defaults intégrés au bot (français + français
+      # via env LANG si besoin). Format : titre + status + summary + description
+      # + runbook_url + link to Alertmanager UI.
+      TEMPLATE_PATHS: "/templates/default.tmpl"
+    volumes:
+      - alertmanager_bot_data:/data
+    networks: [ops-net]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/health || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3

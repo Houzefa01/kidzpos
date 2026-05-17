@@ -145,32 +145,93 @@ curl -X POST http://localhost:9093/api/v2/alerts -H "Content-Type: application/j
 
 ---
 
-## Modifier le canal d'alerte
+## Canal d'alerte Telegram (OPS+1.1)
 
-Par défaut, les alertes critiques vont vers un webhook factice
-`http://host.docker.internal:8081/alert`. Pour brancher un vrai canal :
+Alertmanager pousse les alertes vers le container `alertmanager-bot`
+(`metalmatze/alertmanager-bot:0.4.3`) qui relaie vers Telegram. Pas de
+bricolage webhook direct vers l'API Telegram (format JSON incompatible).
 
-```yaml
-# ops/alertmanager/alertmanager.yml — section receivers
-receivers:
-  - name: critical-sink
-    # Telegram :
-    webhook_configs:
-      - url: "https://api.telegram.org/bot<TOKEN>/sendMessage?chat_id=<CHAT_ID>"
-    
-    # OU email :
-    email_configs:
-      - to: "ops@example.com"
-        from: "alertmanager@kidzpos.local"
-        smarthost: "smtp.example.com:587"
-        auth_username: "alertmanager"
-        auth_password: "${SMTP_PASS}"
-```
+### Setup en 4 étapes
 
-Puis recharger sans restart :
 ```bash
-docker exec kidzpos-alertmanager kill -HUP 1
+# 1. Créer le bot via @BotFather sur Telegram :
+#    /newbot → choisir nom + username → récupérer le token (1234:ABC...)
+
+# 2. Trouver ton chat_id :
+#    Ouvrir conversation avec @userinfobot → il affiche ton ID
+
+# 3. Mettre les valeurs dans ops/.env (cf ops/.env.example)
+cp ops/.env.example ops/.env
+$EDITOR ops/.env       # remplir TELEGRAM_TOKEN et TELEGRAM_ADMIN
+
+# 4. Démarrer (ou redémarrer si déjà up)
+docker compose -f ops/docker-compose.yml --env-file ops/.env up -d
 ```
+
+### S'enregistrer comme destinataire
+
+Côté Telegram, ouvrir le bot que tu viens de créer et taper :
+```
+/start
+```
+
+Le bot répond avec un message de bienvenue et enregistre ton chat_id en
+BoltDB. À partir de là, **toutes les alertes** sont envoyées à ce chat.
+
+Plusieurs opérateurs peuvent recevoir : chacun envoie `/start` et leur
+chat_id doit être listé dans `TELEGRAM_ADMIN` (séparés par virgule).
+
+### Commandes utiles du bot (Telegram)
+
+```
+/start    s'enregistrer comme destinataire
+/stop     se désenregistrer
+/status   état Alertmanager (alertes actives, silences)
+/alerts   liste des alertes actives
+/silences liste des silences
+/chats    qui reçoit (admin only)
+/help     liste complète
+```
+
+### Tester en condition réelle
+
+```bash
+# Test 1 — alerte synthétique via Alertmanager API directement
+curl -X POST http://localhost:9093/api/v2/alerts \
+  -H "Content-Type: application/json" \
+  -d '[{
+    "labels": {"alertname":"TestCritical","severity":"critical","service":"test"},
+    "annotations": {"summary":"Test alerte Telegram","description":"Si tu lis ceci, le pipeline marche."}
+  }]'
+# → message Telegram en < 30 s
+
+# Test 2 — alerte naturelle (BackendDown)
+./start-server.sh stop
+# Attendre 2 min (durée `for:` de l'alerte) → message Telegram
+# Redémarrer : message "RESOLVED" doit suivre 5 min plus tard (resolve_timeout)
+./start-server.sh
+```
+
+### Modifier le routage / format des messages
+
+Le template par défaut du bot (titre + status + summary + description +
+runbook_url) suffit pour 95% des cas. Pour custom :
+- Monter un template Go custom via volume + `TEMPLATE_PATHS`
+- Ou simplement éditer `ops/alertmanager/alertmanager.yml` pour
+  reformater le payload via Alertmanager (recommandé : éviter de toucher
+  le bot, garder les défauts).
+
+Puis recharger Alertmanager sans restart :
+```bash
+docker kill --signal=HUP kidzpos-alertmanager
+```
+
+### Sans Telegram configuré
+
+Si `ops/.env` ne contient pas `TELEGRAM_TOKEN` + `TELEGRAM_ADMIN`,
+`alertmanager-bot` refuse de démarrer (variable non substituée → erreur
+explicite au boot). Les autres services tournent normalement et les
+alertes restent visibles via UI Alertmanager :9093.
 
 ---
 

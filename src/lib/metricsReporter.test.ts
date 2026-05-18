@@ -163,7 +163,7 @@ describe("metricsReporter — résilience", () => {
     expect(apiMock).toHaveBeenCalledTimes(1);
 
     stopMetricsReporter();
-    let outbox = 999;
+    const outbox = 999;
     await vi.advanceTimersByTimeAsync(INTERVAL * 5);
     expect(apiMock).toHaveBeenCalledTimes(1);  // pas de tick supplémentaire
   });

@@ -15,6 +15,7 @@ export function downloadReceiptPdf(sale: Sale, store: Store | undefined, setting
   // U+202F (fine espace insécable, séparateur de milliers FR) → "/" et
   // U+2212 (signe moins) → "?". On normalise tout en ASCII avant impression.
   const safe = (s: string) =>
+    // eslint-disable-next-line no-irregular-whitespace -- U+202F (NNBSP) et U+00A0 (NBSP) intentionnels dans la regex
     s.replace(/[  ]/g, " ").replace(/[−–—]/g, "-");
   const m = (ar: number) => safe(formatMoneyAs(ar, sale.currency, rate));
   const sym = sale.currency === "AR" ? "Ar" : "€";

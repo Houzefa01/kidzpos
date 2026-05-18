@@ -119,7 +119,7 @@ describe("apiClient — single-flight refresh", () => {
       return makeResponse(200, { ok: true });
     });
     // Plus simple : utiliser un compteur par-URL
-    let initialPerUrl: Record<string, number> = {};
+    const initialPerUrl: Record<string, number> = {};
     fetchMock.mockImplementation(async (url: string | URL, init?: RequestInit) => {
       const u = String(url);
       if (u.includes("/api/auth/refresh")) {

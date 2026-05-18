@@ -34,7 +34,13 @@ public class SecurityConfig {
                     // /actuator/prometheus est ouvert pour scraping. En prod : restreindre
                     // au CIDR du Prometheus via le reverse-proxy (Caddy/nginx).
                     "/actuator/prometheus",
-                    "/api/events/stream"
+                    "/api/events/stream",
+                    // springdoc-openapi : spec OpenAPI 3 consommée par
+                    // openapi-typescript côté frontend (cf scripts/gen-api-types.mjs).
+                    // Contenu = structure des controllers + DTOs, pas de donnée client.
+                    // En prod publique, restreindre via reverse-proxy au CIDR du build runner.
+                    "/v3/api-docs",
+                    "/v3/api-docs/**"
                 ).permitAll()
                 // M4 : /api/exchange/refresh déclenche un appel HTTP sortant ⇒ exiger une auth
                 // pour éviter qu'un client non autorisé sur le LAN ne spamme l'API externe.

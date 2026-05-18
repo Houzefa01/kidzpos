@@ -65,6 +65,20 @@ logging:
     # Silence "Failure in @ExceptionHandler" pour les broken pipes SSE (cf GlobalExceptionHandler)
     "[org.springframework.web.servlet.mvc.method.annotation.ExceptionHandlerExceptionResolver]": ERROR
 
+# springdoc-openapi : la spec /v3/api-docs reste exposée (consommée par
+# openapi-typescript pour la génération des types frontend, cf gen:api-types).
+# Swagger UI désactivée par défaut — l'activer en dev via :
+#   SPRINGDOC_SWAGGER_UI_ENABLED=true
+springdoc:
+  api-docs:
+    enabled: true
+    path: /v3/api-docs
+  swagger-ui:
+    enabled: ${SPRINGDOC_SWAGGER_UI_ENABLED:false}
+    path: /swagger-ui.html
+  # Limite la génération aux endpoints applicatifs (exclut /actuator/**).
+  paths-to-match: /api/**
+
 kidzpos:
   jwt:
     # P1.2 : pas de défaut. Le backend refuse de démarrer si JWT_SECRET est absent

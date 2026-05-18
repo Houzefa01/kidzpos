@@ -29,6 +29,11 @@ public class EventBus {
     private final Map<Long, SseEmitter> emitters = new ConcurrentHashMap<>();
     private final AtomicLong seq = new AtomicLong();
 
+    /** Horodatage du dernier broadcast effectif (change OU ping). Exposé via
+     *  {@link com.kidzpos.observability.SseHealthIndicator} pour détecter un
+     *  bus zombie (heartbeater bloqué = signal critique côté ops). */
+    private volatile long lastBroadcastAt = System.currentTimeMillis();
+
     private final ExecutorService broadcaster = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "sse-broadcaster");
         t.setDaemon(true);
@@ -65,6 +70,10 @@ public class EventBus {
     }
 
     private void sendToAll(String eventName, Map<String, Object> data) {
+        // Le timestamp est mis à jour AVANT l'envoi : il signale que le thread
+        // (broadcaster ou heartbeater) est vivant, indépendamment du nombre de
+        // subscribers (le heartbeater early-return si emitters.isEmpty()).
+        lastBroadcastAt = System.currentTimeMillis();
         List<Long> stale = new ArrayList<>();
         for (var entry : new ArrayList<>(emitters.entrySet())) {
             try {
@@ -83,10 +92,19 @@ public class EventBus {
     public void startHeartbeat() {
         // Ping toutes les 30s — empêche le timeout réseau (proxy, NAT, mobile data)
         heartbeater.scheduleAtFixedRate(() -> {
+            // Marque le tick avant le early-return : prouve que le scheduler tourne
+            // même si aucun client SSE n'est connecté (le health indicator s'appuie
+            // sur cette fraîcheur pour détecter un heartbeater zombie).
+            lastBroadcastAt = System.currentTimeMillis();
             if (emitters.isEmpty()) return;
-            Map<String, Object> ping = Map.of("ts", System.currentTimeMillis());
+            Map<String, Object> ping = Map.of("ts", lastBroadcastAt);
             sendToAll("ping", ping);
         }, 30, 30, TimeUnit.SECONDS);
+    }
+
+    /** Exposé pour {@link com.kidzpos.observability.SseHealthIndicator}. */
+    public long lastBroadcastAt() {
+        return lastBroadcastAt;
     }
 
     @PreDestroy

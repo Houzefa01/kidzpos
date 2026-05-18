@@ -61,7 +61,14 @@ management:
         include: health,info,metrics,prometheus
   endpoint:
     health:
-      show-details: never
+      # never : payload public limité à {status: UP|DOWN} → safe pour le LB.
+      # when_authorized : payload détaillé (DB, Flyway, SSE bus subscribers, etc.)
+      # exposé UNIQUEMENT aux utilisateurs porteurs d'un JWT valide (cf JwtAuthFilter).
+      # En LAN HTTP la frontière auth est l'unique barrière — pas de leak public.
+      show-details: when_authorized
+      # Affiche systématiquement chaque composant (DB, Flyway, sseBus, …) dans le payload
+      # détaillé, même quand l'agrégat est UP. Aide à diagnostiquer "lequel parmi N est down".
+      show-components: when_authorized
   prometheus:
     metrics:
       export:

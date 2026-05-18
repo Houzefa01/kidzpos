@@ -4,6 +4,7 @@ import com.kidzpos.domain.Role;
 import com.kidzpos.domain.User;
 import com.kidzpos.dto.Dtos.*;
 import com.kidzpos.repo.UserRepository;
+import com.kidzpos.security.UserCache;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -19,9 +20,10 @@ public class UserController {
     private final UserRepository users;
     private final PasswordEncoder encoder;
     private final EventBus bus;
+    private final UserCache userCache;
 
-    public UserController(UserRepository users, PasswordEncoder encoder, EventBus bus) {
-        this.users = users; this.encoder = encoder; this.bus = bus;
+    public UserController(UserRepository users, PasswordEncoder encoder, EventBus bus, UserCache userCache) {
+        this.users = users; this.encoder = encoder; this.bus = bus; this.userCache = userCache;
     }
 
     @GetMapping
@@ -66,6 +68,9 @@ public class UserController {
         if (req.active() != null) u.setActive(req.active());
         if (req.password() != null && !req.password().isBlank()) u.setPasswordHash(encoder.encode(req.password()));
         var saved = users.save(u);
+        // Invalide le cache JwtAuthFilter immédiatement — la prochaine requête
+        // re-fetch l'entité fraîche (active flag, role, storeId potentiellement changés).
+        userCache.invalidate(id);
         var res = AuthController.toRes(saved);
         bus.publish("user", "updated", res);
         return ResponseEntity.ok(res);
@@ -79,6 +84,9 @@ public class UserController {
             return ResponseEntity.badRequest().body(java.util.Map.of("error", "Impossible : dernier admin"));
         }
         users.deleteById(id);
+        // Invalide le cache : tout JWT de cet user émis avant la suppression
+        // se verra désormais refuser l'auth (cache miss → repo empty → no auth set).
+        userCache.invalidate(id);
         bus.publish("user", "deleted", java.util.Map.of("id", id));
         return ResponseEntity.noContent().build();
     }

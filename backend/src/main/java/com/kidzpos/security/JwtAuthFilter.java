@@ -1,7 +1,6 @@
 package com.kidzpos.security;
 
 import com.kidzpos.domain.User;
-import com.kidzpos.repo.UserRepository;
 import io.jsonwebtoken.Claims;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -26,9 +25,9 @@ public class JwtAuthFilter extends OncePerRequestFilter {
     private static final Logger log = LoggerFactory.getLogger(JwtAuthFilter.class);
 
     private final JwtService jwt;
-    private final UserRepository users;
+    private final UserCache users;
 
-    public JwtAuthFilter(JwtService jwt, UserRepository users) {
+    public JwtAuthFilter(JwtService jwt, UserCache users) {
         this.jwt = jwt;
         this.users = users;
     }
@@ -41,6 +40,9 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             try {
                 Claims c = jwt.parse(header.substring(7));
                 String userId = c.getSubject();
+                // Cache hit attendu sur le hot path : économise un SELECT users
+                // par requête authentifiée. TTL court (30s par défaut) + invalidation
+                // explicite depuis UserController bornent la fenêtre stale.
                 Optional<User> u = users.findById(userId);
                 if (u.isPresent() && u.get().isActive()) {
                     User user = u.get();

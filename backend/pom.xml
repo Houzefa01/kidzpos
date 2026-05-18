@@ -101,6 +101,14 @@
             <version>${springdoc.version}</version>
         </dependency>
 
+        <!-- Caffeine : cache in-memory haute performance utilisé par UserCache
+             (cf JwtAuthFilter, évite 1 SELECT/req sur la table users). Version
+             gérée par Spring Boot BOM (3.1.8). -->
+        <dependency>
+            <groupId>com.github.ben-manes.caffeine</groupId>
+            <artifactId>caffeine</artifactId>
+        </dependency>
+
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>

@@ -142,6 +142,74 @@ function safeJson(t: string): unknown {
   try { return JSON.parse(t); } catch { return t; }
 }
 
+// ────────────────────────────────────────────────────────────────────────────
+// PR http-hardening — Cache HTTP via If-None-Match / 304 Not Modified.
+//
+// Helper séparé (n'altère pas `api<T>` ni ses 24 call-sites) pour les GET sur
+// lesquels le backend expose un ETag (cf ProductController.list). Le caller :
+//   1. Conserve l'ETag retourné entre deux appels
+//   2. Le repasse en `ifNoneMatch` au call suivant
+//   3. Si `notModified === true` → garde son état local, économise le payload
+//
+// Auth : reprend la même logique que api<T> (Bearer + refresh silencieux).
+// Pas de retry _retried distinct : le refresh-on-401 est partagé via le
+// single-flight `refreshAccessToken()`.
+// ────────────────────────────────────────────────────────────────────────────
+
+export interface EtagResult<T> {
+  /** True si le serveur a répondu 304 : `data` est null, le caller garde son état. */
+  notModified: boolean;
+  /** ETag de la réponse (présent en 200 ET en 304, cf RFC 7232 §4.1). */
+  etag: string | null;
+  /** Payload parsé. Null si 304 ou si la réponse est vide. */
+  data: T | null;
+}
+
+export async function apiWithEtag<T = unknown>(
+  path: string,
+  ifNoneMatch?: string,
+  opts: Omit<ApiOptions, "method" | "body"> = {},
+): Promise<EtagResult<T>> {
+  const token = opts.noAuth ? null : tokenStore.get();
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? 4000);
+  try {
+    const res = await fetch(`${getApiUrl()}${path}`, {
+      method: "GET",
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(ifNoneMatch ? { "If-None-Match": ifNoneMatch } : {}),
+        ...(opts.headers ?? {}),
+      },
+      credentials: "include",
+      signal: ctrl.signal,
+    });
+
+    // 401 → refresh silencieux + retry une fois (même contrat que api<T>).
+    if (res.status === 401 && !opts.noAuth && !opts._retried) {
+      const newToken = await refreshAccessToken();
+      if (newToken) {
+        return apiWithEtag<T>(path, ifNoneMatch, { ...opts, _retried: true });
+      }
+      tokenStore.set(null);
+      window.dispatchEvent(new CustomEvent("auth:session-expired"));
+    }
+
+    const etag = res.headers.get("ETag");
+    if (res.status === 304) {
+      return { notModified: true, etag, data: null };
+    }
+    const text = await res.text();
+    const data = text ? (safeJson(text) as T) : null;
+    if (!res.ok) {
+      throw new ApiError(res.status, data);
+    }
+    return { notModified: false, etag, data };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** Ping rapide pour détecter si le backend répond. Silencieux. */
 export async function pingBackend(timeoutMs = 1500): Promise<boolean> {
   try {

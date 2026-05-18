@@ -1,6 +1,16 @@
 server:
   port: ${SERVER_PORT:8080}
   address: 0.0.0.0       # écoute sur toutes les interfaces (LAN)
+  # Compression gzip sur les payloads JSON : gain typique ×5 à ×10 sur les
+  # responses /api/products et /api/sales (texte JSON très compressible).
+  # min-response-size évite la compression sur les petites réponses (overhead
+  # du framing gzip > gain). 1 KB = seuil standard.
+  compression:
+    enabled: true
+    # ⚠ NE PAS inclure text/event-stream : gzip bufferise et casse le streaming
+    # temps réel des SSE (heartbeat + change events). Tomcat respecte ce filtrage.
+    mime-types: application/json
+    min-response-size: 1024
   # P2.2 : derrière un reverse-proxy (Caddy/nginx), Tomcat lit X-Forwarded-For
   # et expose la VRAIE IP cliente via req.getRemoteAddr() — utilisé par
   # LoginRateLimitFilter et RefreshRateLimitFilter. NATIVE n'accepte les headers

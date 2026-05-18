@@ -46,7 +46,7 @@ class CrossStoreReadGuardTest {
     void productList_employeeWithoutStoreId_returns403() {
         ProductController c = new ProductController(
                 mock(ProductRepository.class), mock(EventBus.class), new BusinessMetrics(new SimpleMeterRegistry()));
-        ResponseEntity<?> res = c.list(null, employee("s1"));
+        ResponseEntity<?> res = c.list(null, null, employee("s1"));
         assertForbidden(res);
     }
 
@@ -54,7 +54,7 @@ class CrossStoreReadGuardTest {
     void productList_employeeRequestingOtherStore_returns403() {
         ProductController c = new ProductController(
                 mock(ProductRepository.class), mock(EventBus.class), new BusinessMetrics(new SimpleMeterRegistry()));
-        ResponseEntity<?> res = c.list("s2", employee("s1"));
+        ResponseEntity<?> res = c.list("s2", null, employee("s1"));
         assertForbidden(res);
     }
 
@@ -63,7 +63,7 @@ class CrossStoreReadGuardTest {
         ProductRepository repo = mock(ProductRepository.class);
         when(repo.findByStoreId("s1")).thenReturn(List.of());
         ProductController c = new ProductController(repo, mock(EventBus.class), new BusinessMetrics(new SimpleMeterRegistry()));
-        ResponseEntity<?> res = c.list("s1", employee("s1"));
+        ResponseEntity<?> res = c.list("s1", null, employee("s1"));
         assertThat(res.getStatusCode()).isEqualTo(HttpStatus.OK);
     }
 
@@ -72,8 +72,66 @@ class CrossStoreReadGuardTest {
         ProductRepository repo = mock(ProductRepository.class);
         when(repo.findAll()).thenReturn(List.of());
         ProductController c = new ProductController(repo, mock(EventBus.class), new BusinessMetrics(new SimpleMeterRegistry()));
-        ResponseEntity<?> res = c.list(null, admin());
+        ResponseEntity<?> res = c.list(null, null, admin());
         assertThat(res.getStatusCode()).isEqualTo(HttpStatus.OK);
+    }
+
+    // ──── PR http-hardening — ETag collection produits ──────────────────────
+
+    @Test
+    void productList_returnsEtagHeader() {
+        ProductRepository repo = mock(ProductRepository.class);
+        when(repo.findAll()).thenReturn(List.of(productFixture("p-1", 0), productFixture("p-2", 0)));
+        ProductController c = new ProductController(repo, mock(EventBus.class), new BusinessMetrics(new SimpleMeterRegistry()));
+        ResponseEntity<?> res = c.list(null, null, admin());
+        assertThat(res.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(res.getHeaders().getETag()).isNotBlank().startsWith("W/\"");
+    }
+
+    @Test
+    void productList_with_ifNoneMatch_matching_returns304WithEmptyBody() {
+        ProductRepository repo = mock(ProductRepository.class);
+        when(repo.findAll()).thenReturn(List.of(productFixture("p-1", 7), productFixture("p-2", 3)));
+        ProductController c = new ProductController(repo, mock(EventBus.class), new BusinessMetrics(new SimpleMeterRegistry()));
+        // 1er appel récupère l'ETag
+        String etag = c.list(null, null, admin()).getHeaders().getETag();
+        // 2e appel le repasse → 304 sans body, ETag rééémis (RFC 7232 §4.1)
+        ResponseEntity<?> res = c.list(null, etag, admin());
+        assertThat(res.getStatusCode()).isEqualTo(HttpStatus.NOT_MODIFIED);
+        assertThat(res.getBody()).isNull();
+        assertThat(res.getHeaders().getETag()).isEqualTo(etag);
+    }
+
+    @Test
+    void productList_with_ifNoneMatch_stale_returns200WithBody() {
+        ProductRepository repo = mock(ProductRepository.class);
+        when(repo.findAll()).thenReturn(List.of(productFixture("p-1", 0)));
+        ProductController c = new ProductController(repo, mock(EventBus.class), new BusinessMetrics(new SimpleMeterRegistry()));
+        ResponseEntity<?> res = c.list(null, "W/\"obsolete-etag\"", admin());
+        assertThat(res.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(res.getBody()).isNotNull();
+    }
+
+    @Test
+    void productList_etag_changesWhenVersionChanges() {
+        ProductRepository repo = mock(ProductRepository.class);
+        ProductController c = new ProductController(repo, mock(EventBus.class), new BusinessMetrics(new SimpleMeterRegistry()));
+        // Snapshot 1 : version 0
+        when(repo.findAll()).thenReturn(List.of(productFixture("p-1", 0)));
+        String etag1 = c.list(null, null, admin()).getHeaders().getETag();
+        // Snapshot 2 : même id, version incrémentée → ETag doit changer
+        when(repo.findAll()).thenReturn(List.of(productFixture("p-1", 1)));
+        String etag2 = c.list(null, null, admin()).getHeaders().getETag();
+        assertThat(etag2).isNotEqualTo(etag1);
+    }
+
+    private static com.kidzpos.domain.Product productFixture(String id, int version) {
+        return com.kidzpos.domain.Product.builder()
+                .id(id).name("test").price(1000).stock(10)
+                .storeId("s1").sku("SKU-" + id)
+                .createdAt(java.time.Instant.now())
+                .version(version)
+                .build();
     }
 
     // ──── StockController.movements ─────────────────────────────────────────

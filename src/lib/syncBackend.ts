@@ -1,4 +1,4 @@
-import { api, refreshAccessToken, tokenStore, ApiError } from "@/lib/apiClient";
+import { api, apiWithEtag, refreshAccessToken, tokenStore, ApiError } from "@/lib/apiClient";
 import { useAuth } from "@/store/auth";
 import { useData } from "@/store/data";
 import { useSales } from "@/store/sales";
@@ -28,6 +28,7 @@ let _needsRehydrate = false;
  */
 type FetchResult<T> =
   | { ok: true; data: T }
+  | { ok: true; notModified: true }    // 304 : serveur dit "rien changé", on garde l'état
   | { ok: false; status?: number; error: string };
 
 async function fetchAndParse<T>(path: string, schema: ZodSchema<T>): Promise<FetchResult<T>> {
@@ -37,6 +38,35 @@ async function fetchAndParse<T>(path: string, schema: ZodSchema<T>): Promise<Fet
     return { ok: true, data };
   } catch (e: unknown) {
     if (e instanceof ApiError) {
+      return { ok: false, status: e.status, error: e.message };
+    }
+    const message = e instanceof Error ? e.message : "Erreur inconnue";
+    return { ok: false, error: message };
+  }
+}
+
+// PR http-hardening — ETag cache pour /api/products (cf ProductController.list).
+// ETag persistant entre appels au sein d'une session : si rien n'a changé
+// côté backend, le serveur renvoie 304 sans body → on skip l'écrasement de
+// useData.products et on économise le payload.
+//
+// Stockage en module : volatile (perdu au refresh, OK car syncBackend re-hydrate
+// au boot de toute façon). Pas de besoin de persister.
+let productsEtag: string | null = null;
+
+async function fetchAndParseWithEtag<T>(path: string, schema: ZodSchema<T>): Promise<FetchResult<T>> {
+  try {
+    const res = await apiWithEtag<unknown>(path, productsEtag ?? undefined);
+    if (res.etag) productsEtag = res.etag;
+    if (res.notModified) {
+      return { ok: true, notModified: true };
+    }
+    const data = schema.parse(res.data);
+    return { ok: true, data };
+  } catch (e: unknown) {
+    if (e instanceof ApiError) {
+      // Sur 404/410 (rare), invalider le cache pour ne pas boucler sur un ETag mort
+      if (e.status === 404 || e.status === 410) productsEtag = null;
       return { ok: false, status: e.status, error: e.message };
     }
     const message = e instanceof Error ? e.message : "Erreur inconnue";
@@ -81,9 +111,11 @@ export async function hydrateFromBackend(): Promise<{ ok: boolean; error?: strin
 
     // P2.1 : Promise.allSettled — toutes les ressources tentent en parallèle,
     // aucune ne fait tomber l'ensemble.
+    // PR http-hardening : /api/products passe par fetchAndParseWithEtag pour
+    // bénéficier du 304 Not Modified si le catalogue n'a pas bougé.
     const [storesR, productsR, salesR, customersR, settingsR, usersR] = await Promise.all([
       fetchAndParse("/api/stores", z.array(StoreSchema)),
-      fetchAndParse(`/api/products${storeScope}`, z.array(ProductSchema)),
+      fetchAndParseWithEtag(`/api/products${storeScope}`, z.array(ProductSchema)),
       fetchAndParse(`/api/sales${storeScope}`, z.array(SaleSchema)),
       fetchAndParse("/api/customers", z.array(CustomerSchema)),
       fetchAndParse("/api/settings", SettingsSchema),
@@ -102,13 +134,17 @@ export async function hydrateFromBackend(): Promise<{ ok: boolean; error?: strin
       return { ok: false, error: "Session expirée" };
     }
 
-    // Application indépendante : chaque store reçoit ses données ssi le fetch est OK.
-    if (storesR.ok && productsR.ok) {
-      useData.setState({ stores: storesR.data, products: productsR.data });
+    // Application indépendante : chaque store reçoit ses données ssi le fetch est OK
+    // ET que le serveur a renvoyé des données fraîches (pas un 304 Not Modified).
+    // Sur 304 produits, on garde l'état local (useData.products inchangé).
+    const productsFresh = productsR.ok && "data" in productsR;
+    const productsData = productsFresh ? productsR.data : null;
+    if (storesR.ok && productsFresh) {
+      useData.setState({ stores: storesR.data, products: productsData! });
     } else if (storesR.ok) {
       useData.setState({ stores: storesR.data });
-    } else if (productsR.ok) {
-      useData.setState({ products: productsR.data });
+    } else if (productsFresh) {
+      useData.setState({ products: productsData! });
     }
 
     if (salesR.ok) {

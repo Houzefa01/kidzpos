@@ -9,6 +9,7 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter;
 
 @Configuration
 public class SecurityConfig {
@@ -25,6 +26,36 @@ public class SecurityConfig {
         http
             .csrf(c -> c.disable())
             .cors(c -> {})
+            // ─── PR http-hardening — security headers ─────────────────────────
+            // Le backend sert UNIQUEMENT du JSON (/api/**) + spec OpenAPI + actuator.
+            // Pas de HTML, pas de scripts à exécuter côté navigateur. CSP très stricte
+            // (default-src 'none') = défense en profondeur contre l'embedding tiers.
+            // Le frontend dist/ est servi par un serveur statique séparé (start-server.sh),
+            // ses propres headers CSP/HSTS sont à configurer côté reverse-proxy en prod.
+            //
+            //  - HSTS : envoyé uniquement quand request.isSecure() (Spring default).
+            //    LAN HTTP : pas d'effet. Derrière Caddy HTTPS : 1 an + includeSubDomains.
+            //  - X-Frame-Options: DENY + CSP frame-ancestors 'none' : anti-clickjacking
+            //    (double ceinture pour les navigateurs anciens qui ignorent CSP).
+            //  - X-Content-Type-Options: nosniff (par défaut Spring) : empêche le MIME
+            //    sniffing qui pourrait interpréter du JSON comme du script.
+            //  - Referrer-Policy: strict-origin-when-cross-origin : pas de leak d'URL
+            //    complète (avec query params type ?storeId=) vers les origines tierces.
+            .headers(h -> h
+                .frameOptions(f -> f.deny())
+                .httpStrictTransportSecurity(hsts -> hsts
+                    .includeSubDomains(true)
+                    .maxAgeInSeconds(31536000))   // 1 an
+                .referrerPolicy(r -> r.policy(
+                    ReferrerPolicyHeaderWriter.ReferrerPolicy.STRICT_ORIGIN_WHEN_CROSS_ORIGIN))
+                .contentSecurityPolicy(csp -> csp.policyDirectives(
+                    "default-src 'none'; "
+                    + "frame-ancestors 'none'; "
+                    + "base-uri 'none'; "
+                    + "form-action 'none'"))
+                // X-Content-Type-Options: nosniff + Cache-Control: no-cache par défaut
+                // sont activés par Spring Security → on les conserve implicitement.
+            )
             .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(a -> a
                 .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()

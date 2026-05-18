@@ -9,15 +9,18 @@ import com.kidzpos.security.JwtAuthFilter.AuthPrincipal;
 import com.kidzpos.security.StoreAccessGuard;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.zip.CRC32;
 
 @RestController
 @RequestMapping("/api/products")
@@ -33,14 +36,45 @@ public class ProductController {
      * P4 — Politique GET cross-store STRICTE : un EMPLOYEE sans storeId (=
      * demande "tous les magasins") ou avec un storeId ≠ son magasin → 403.
      * ADMIN passe partout. Pas de fallback silencieux.
+     *
+     * PR http-hardening — Cache HTTP : weak ETag dérivé du contenu de la
+     * collection (id + version de chaque produit). Si le client repasse cet
+     * ETag en If-None-Match et que rien n'a bougé → 304 Not Modified sans
+     * body → ~zéro octet à transférer + le client garde son état local.
      */
     @GetMapping
     public ResponseEntity<?> list(@RequestParam(required = false) String storeId,
+                                  @RequestHeader(value = HttpHeaders.IF_NONE_MATCH, required = false) String ifNoneMatch,
                                   @AuthenticationPrincipal AuthPrincipal me) {
         var deny = StoreAccessGuard.denyIfCrossStore(me, storeId);
         if (deny != null) return deny;
         var products = storeId == null ? repo.findAll() : repo.findByStoreId(storeId);
-        return ResponseEntity.ok(products);
+        String etag = collectionEtag(products);
+        if (etag.equals(ifNoneMatch)) {
+            // 304 doit ré-émettre l'ETag (RFC 7232 §4.1) et un body vide.
+            return ResponseEntity.status(HttpStatus.NOT_MODIFIED).eTag(etag).build();
+        }
+        return ResponseEntity.ok().eTag(etag).body(products);
+    }
+
+    /**
+     * Weak ETag (préfixe W/) sur la collection : pas byte-exact (dépend de
+     * l'ordre de findAll), mais sémantiquement stable tant que (id, version)
+     * de chaque produit est inchangé. CRC32 suffit pour le hachage : on n'a
+     * pas besoin de résistance aux collisions cryptographique (le pire cas
+     * = false negative = on renvoie une 304 alors qu'on aurait dû renvoyer
+     * 200 ; probabilité ~10⁻¹⁰ pour des catalogues < 10k items, et toute
+     * mutation incrémente le version → CRC change).
+     */
+    private static String collectionEtag(List<Product> products) {
+        CRC32 crc = new CRC32();
+        for (Product p : products) {
+            crc.update(p.getId().getBytes(StandardCharsets.UTF_8));
+            crc.update((byte) ':');
+            crc.update(String.valueOf(p.getVersion()).getBytes(StandardCharsets.UTF_8));
+            crc.update((byte) '|');
+        }
+        return "W/\"" + products.size() + "-" + Long.toHexString(crc.getValue()) + "\"";
     }
 
     /** Variant GET unique : retourne ETag = version pour permettre If-Match au PUT. */

@@ -8,6 +8,7 @@ import com.kidzpos.observability.BusinessMetrics;
 import com.kidzpos.repo.ProductRepository;
 import com.kidzpos.repo.StockMovementRepository;
 import com.kidzpos.security.JwtAuthFilter.AuthPrincipal;
+import com.kidzpos.security.StoreAccessGuard;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import jakarta.validation.Valid;
@@ -36,23 +37,36 @@ public class StockController {
         this.products = products; this.moves = moves; this.bus = bus; this.metrics = metrics;
     }
 
+    /**
+     * P4 — Politique GET cross-store STRICTE : un EMPLOYEE sans storeId (=
+     * demande "tous les magasins") ou avec un storeId ≠ son magasin → 403.
+     * ADMIN passe partout. Pas de fallback silencieux.
+     */
     @GetMapping("/movements")
-    public List<StockMovement> movements(@RequestParam(required = false) String storeId) {
-        return storeId == null ? moves.findAllByOrderByDateDesc() : moves.findByStoreIdOrderByDateDesc(storeId);
+    public ResponseEntity<?> movements(@RequestParam(required = false) String storeId,
+                                       @AuthenticationPrincipal AuthPrincipal me) {
+        var deny = StoreAccessGuard.denyIfCrossStore(me, storeId);
+        if (deny != null) return deny;
+        var list = storeId == null ? moves.findAllByOrderByDateDesc() : moves.findByStoreIdOrderByDateDesc(storeId);
+        return ResponseEntity.ok(list);
     }
 
     @PostMapping("/adjust")
     @Transactional
     public ResponseEntity<?> adjust(@Valid @RequestBody StockAdjustReq r, @AuthenticationPrincipal AuthPrincipal me) {
+        // P1.1 : un EMPLOYEE ne peut ajuster un produit que de SON magasin.
+        // Check en amont du path idempotent pour éviter de leak l'état d'un produit
+        // cross-store via la réponse idempotente.
+        var p = products.findById(r.productId()).orElse(null);
+        if (p == null) return ResponseEntity.notFound().build();
+        var deny = StoreAccessGuard.denyIfCrossStore(me, p.getStoreId());
+        if (deny != null) return deny;
+
         // Idempotence (V8) : si ce mouvement client a déjà été appliqué (replay outbox),
         // on retourne l'état courant sans dupliquer le delta.
         if (isIdempotentReplay(r.clientMovementId())) {
-            return products.findById(r.productId())
-                    .<ResponseEntity<?>>map(ResponseEntity::ok)
-                    .orElseGet(() -> ResponseEntity.ok(Map.of("idempotent", true)));
+            return ResponseEntity.ok(p);
         }
-        var p = products.findById(r.productId()).orElse(null);
-        if (p == null) return ResponseEntity.notFound().build();
         int newStock = p.getStock() + r.delta();
         if (newStock < 0) return ResponseEntity.badRequest().body(Map.of("error", "Stock négatif"));
         p.setStock(newStock); products.save(p);

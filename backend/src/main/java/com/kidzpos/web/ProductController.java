@@ -5,10 +5,13 @@ import com.kidzpos.dto.Dtos.ProductReq;
 import com.kidzpos.events.EventBus;
 import com.kidzpos.observability.BusinessMetrics;
 import com.kidzpos.repo.ProductRepository;
+import com.kidzpos.security.JwtAuthFilter.AuthPrincipal;
+import com.kidzpos.security.StoreAccessGuard;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
@@ -26,9 +29,18 @@ public class ProductController {
         this.repo = repo; this.bus = bus; this.metrics = metrics;
     }
 
+    /**
+     * P4 — Politique GET cross-store STRICTE : un EMPLOYEE sans storeId (=
+     * demande "tous les magasins") ou avec un storeId ≠ son magasin → 403.
+     * ADMIN passe partout. Pas de fallback silencieux.
+     */
     @GetMapping
-    public List<Product> list(@RequestParam(required = false) String storeId) {
-        return storeId == null ? repo.findAll() : repo.findByStoreId(storeId);
+    public ResponseEntity<?> list(@RequestParam(required = false) String storeId,
+                                  @AuthenticationPrincipal AuthPrincipal me) {
+        var deny = StoreAccessGuard.denyIfCrossStore(me, storeId);
+        if (deny != null) return deny;
+        var products = storeId == null ? repo.findAll() : repo.findByStoreId(storeId);
+        return ResponseEntity.ok(products);
     }
 
     /** Variant GET unique : retourne ETag = version pour permettre If-Match au PUT. */
@@ -42,7 +54,10 @@ public class ProductController {
     }
 
     @PostMapping
-    public ResponseEntity<?> create(@Valid @RequestBody ProductReq r) {
+    public ResponseEntity<?> create(@Valid @RequestBody ProductReq r, @AuthenticationPrincipal AuthPrincipal me) {
+        // P1.1 (extension) : un EMPLOYEE ne peut créer un produit que dans SON magasin.
+        var deny = StoreAccessGuard.denyIfCrossStore(me, r.storeId());
+        if (deny != null) return deny;
         if (repo.findByStoreIdAndSkuIgnoreCase(r.storeId(), r.sku()).isPresent()) {
             return ResponseEntity.badRequest().body(java.util.Map.of("error", "SKU déjà utilisé dans ce magasin"));
         }
@@ -60,9 +75,18 @@ public class ProductController {
     @PutMapping("/{id}")
     @Transactional
     public ResponseEntity<?> update(@PathVariable String id, @Valid @RequestBody ProductReq r,
-                                    @RequestHeader(value = HttpHeaders.IF_MATCH, required = false) String ifMatch) {
+                                    @RequestHeader(value = HttpHeaders.IF_MATCH, required = false) String ifMatch,
+                                    @AuthenticationPrincipal AuthPrincipal me) {
         var p = repo.findById(id).orElse(null);
         if (p == null) return ResponseEntity.notFound().build();
+        // P1.1 (extension) : double check sur le produit existant ET sur le storeId
+        // demandé. Empêche (a) un EMPLOYEE de modifier un produit cross-store et
+        // (b) un EMPLOYEE de déplacer un produit hors de son magasin (ou d'en
+        // siphonner un en le ré-allouant à son magasin).
+        var denyCurrent = StoreAccessGuard.denyIfCrossStore(me, p.getStoreId());
+        if (denyCurrent != null) return denyCurrent;
+        var denyTarget = StoreAccessGuard.denyIfCrossStore(me, r.storeId());
+        if (denyTarget != null) return denyTarget;
         // Optimistic locking : si le client a lu un ETag (via GET /{id}) et le repasse
         // en If-Match, on rejette 412 si la version a changé entretemps. L'absence du
         // header reste tolérée pour rétrocompat avec clients qui ne lisent pas l'ETag.

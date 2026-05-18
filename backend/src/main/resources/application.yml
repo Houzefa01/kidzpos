@@ -67,7 +67,10 @@ logging:
 
 kidzpos:
   jwt:
-    secret: ${JWT_SECRET:change-me-in-prod-please-use-a-very-long-random-string-32+bytes}
+    # P1.2 : pas de défaut. Le backend refuse de démarrer si JWT_SECRET est absent
+    # ou < 32 octets (cf JwtService). Générer avec : openssl rand -base64 48
+    # En dev/test, application-test.yml fournit une clé valide.
+    secret: ${JWT_SECRET:}
     # expiration-hours est conservé pour rétrocompat ; access-token-minutes prend
     # la précédence si défini. Recommandation P2 : 15 minutes.
     expiration-hours: 0

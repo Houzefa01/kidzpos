@@ -5,6 +5,7 @@ import com.kidzpos.dto.Dtos.*;
 import com.kidzpos.observability.BusinessMetrics;
 import com.kidzpos.repo.*;
 import com.kidzpos.security.JwtAuthFilter.AuthPrincipal;
+import com.kidzpos.security.StoreAccessGuard;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -52,11 +53,18 @@ public class SaleController {
      * Listing des ventes. Rétrocompat : si `page` non fourni → renvoie TOUTES les ventes
      * (comportement historique, consommé par syncBackend). Sinon → Spring Page<Sale> avec
      * tri date DESC déjà appliqué côté repo. Le client paginé peut lire `content` + `totalElements`.
+     *
+     * P4 — Politique GET cross-store STRICTE : un EMPLOYEE qui appelle sans `storeId`
+     * (= demande "tous les magasins") ou avec un storeId ≠ son magasin → 403.
+     * ADMIN passe partout. Pas de fallback silencieux : refus explicite.
      */
     @GetMapping
     public Object list(@RequestParam(required = false) String storeId,
                        @RequestParam(required = false) Integer page,
-                       @RequestParam(required = false, defaultValue = "50") Integer size) {
+                       @RequestParam(required = false, defaultValue = "50") Integer size,
+                       @AuthenticationPrincipal AuthPrincipal me) {
+        var deny = StoreAccessGuard.denyIfCrossStore(me, storeId);
+        if (deny != null) return deny;
         if (page == null) {
             return storeId == null
                     ? sales.findAllByOrderByDateDesc()
@@ -75,6 +83,11 @@ public class SaleController {
 
     @PostMapping("/checkout")
     public ResponseEntity<?> checkout(@Valid @RequestBody CheckoutReq req, @AuthenticationPrincipal AuthPrincipal me) {
+        // P1.1 : un EMPLOYEE ne peut checkout que sur SON magasin. Check en amont
+        // pour ne pas leak l'existence d'une vente cross-store via le path idempotent.
+        var deny = StoreAccessGuard.denyIfCrossStore(me, req.storeId());
+        if (deny != null) return deny;
+
         // I8 : idempotence — si le client a déjà reçu une réponse pour ce clientSaleId
         // (cas du replay outbox après reconnexion), renvoyer la vente existante.
         if (req.clientSaleId() != null && !req.clientSaleId().isBlank()) {
@@ -210,6 +223,11 @@ public class SaleController {
     private ResponseEntity<?> doRefund(RefundReq req, AuthPrincipal me) {
         var orig = sales.findById(req.saleId()).orElse(null);
         if (orig == null) return ResponseEntity.notFound().build();
+        // P1.1 : défense en profondeur. La guard ADMIN ci-dessus suffit aujourd'hui,
+        // mais si on assouplit la politique (refund par EMPLOYEE sur son magasin),
+        // ce check empêche un EMPLOYEE de rembourser une vente d'un autre magasin.
+        var deny = StoreAccessGuard.denyIfCrossStore(me, orig.getStoreId());
+        if (deny != null) return deny;
         // I5 : refund idempotent — bloquer double-remboursement et refund-d'un-refund
         if (orig.getRefundedFrom() != null) {
             return ResponseEntity.badRequest().body(Map.of("error", "Une vente d'avoir ne peut être remboursée"));
@@ -255,23 +273,58 @@ public class SaleController {
     }
 
     /**
-     * Exécute une opération retournant ResponseEntity, avec retry sur DataIntegrityViolationException
-     * (typiquement collision uk_sale_store_seq sous concurrence).
+     * Nom de la contrainte unique sur (storeId, seq) — cf entité Sale + V1.
+     * Source de vérité côté DDL : @UniqueConstraint(name = "uk_sale_store_seq").
+     */
+    private static final String SEQ_CONSTRAINT = "uk_sale_store_seq";
+
+    /**
+     * Exécute une opération retournant ResponseEntity, avec retry UNIQUEMENT sur
+     * collision de {@link #SEQ_CONSTRAINT} (concurrence checkout/refund parallèle).
+     *
+     * P2.2 — Toute autre {@link DataIntegrityViolationException} est propagée :
+     *  - re-jouer la même mutation produirait la même erreur (FK, PK, autre unique)
+     *  - le GlobalExceptionHandler la traduit en 409 "Conflit de données"
+     *  - le compteur {@code saleSeqRetry} n'est incrémenté que sur retry RÉEL
+     *    (anti-pollution métrique).
      */
     private ResponseEntity<?> runWithSeqRetry(java.util.function.Supplier<ResponseEntity<?>> op) {
         for (int attempt = 0; attempt < SEQ_RETRY_MAX; attempt++) {
             try {
                 return op.get();
             } catch (DataIntegrityViolationException e) {
+                if (!isSeqCollision(e)) {
+                    // Violation d'une autre contrainte → ne pas retry : remonter pour
+                    // que le handler global retourne 409 avec le message exact.
+                    throw e;
+                }
                 metrics.saleSeqRetry.increment();
                 if (attempt == SEQ_RETRY_MAX - 1) {
-                    log.warn("Sale seq retry exhausted after {} attempts", SEQ_RETRY_MAX);
+                    log.warn("Sale seq retry exhausted after {} attempts on {}", SEQ_RETRY_MAX, SEQ_CONSTRAINT);
                     return ResponseEntity.status(409).body(Map.of("error", "Conflit numérotation, réessayez"));
                 }
                 // retry : la prochaine itération relit MAX(seq) dans une nouvelle transaction
             }
         }
         return ResponseEntity.status(409).body(Map.of("error", "Conflit numérotation"));
+    }
+
+    /**
+     * True ssi la violation est sur la contrainte d'unicité (storeId, seq).
+     *
+     * Stratégie : Postgres inclut le constraint name dans le message d'erreur
+     * (org.postgresql.util.PSQLException). On cherche le nom dans la chaîne de
+     * causes pour rester robuste si Hibernate enveloppe l'exception différemment
+     * selon les versions.
+     */
+    private static boolean isSeqCollision(DataIntegrityViolationException e) {
+        Throwable cause = e;
+        while (cause != null) {
+            String msg = cause.getMessage();
+            if (msg != null && msg.contains(SEQ_CONSTRAINT)) return true;
+            cause = cause.getCause();
+        }
+        return false;
     }
 
     /** Ariary canonique : pas de centimes. On arrondit à l'entier le plus proche. */

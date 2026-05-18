@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useAuth } from "@/store/auth";
 import { useData } from "@/store/data";
+import { useSales } from "@/store/sales";
 import { useSettings } from "@/store/settings";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -22,7 +23,8 @@ const colHeadCls = "text-2xs font-medium uppercase tracking-eyebrow text-muted-f
 export default function Sales() {
   const { user } = useAuth();
   const fmt = useFormatMoney();
-  const { sales, stores, refundSale } = useData();
+  const { stores } = useData();
+  const { sales, refundSale } = useSales();
   const { settings } = useSettings();
   const isAdmin = user?.role === "ADMIN";
 

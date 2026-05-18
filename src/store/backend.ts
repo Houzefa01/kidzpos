@@ -62,10 +62,11 @@ export function startBackendWatcher() {
     }, interval) as unknown as number;
   };
 
-  // Ping initial
-  useBackend.getState().pulse().then(schedule);
+  // Ping initial — fire-and-forget : `schedule` enchaîne la boucle au .then.
+  // Le `.then` rend la promesse non-floating ; le `void` documente l'intention.
+  void useBackend.getState().pulse().then(schedule);
 
-  const onOnline = () => useBackend.getState().pulse();
+  const onOnline = () => void useBackend.getState().pulse();
   window.addEventListener("online", onOnline);
 
   const onOutbox = () => useBackend.getState().refreshPending();
@@ -75,14 +76,14 @@ export function startBackendWatcher() {
   const onApiChange = () => {
     stopSse();
     useBackend.setState({ lanReachable: false });
-    useBackend.getState().pulse();
+    void useBackend.getState().pulse();
   };
   window.addEventListener("api-url:change", onApiChange);
 
   // Re-pulse immédiatement quand l'onglet redevient visible (ex: retour après veille)
   const onVisible = () => {
     if (document.visibilityState === "visible") {
-      useBackend.getState().pulse().then(schedule);
+      void useBackend.getState().pulse().then(schedule);
     }
   };
   document.addEventListener("visibilitychange", onVisible);

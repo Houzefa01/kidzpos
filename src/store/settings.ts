@@ -36,11 +36,11 @@ export const useSettings = create<SettingsState>()(
       update: (patch) => {
         set((s) => ({ settings: { ...s.settings, ...patch } }));
         const cur = useSettings.getState().settings;
-        pushMutation("/api/settings", "PUT", cur, "settings");
+        void pushMutation("/api/settings", "PUT", cur, "settings");
       },
       reset: () => {
         set({ settings: DEFAULTS });
-        pushMutation("/api/settings", "PUT", DEFAULTS, "settings");
+        void pushMutation("/api/settings", "PUT", DEFAULTS, "settings");
       },
     }),
     {

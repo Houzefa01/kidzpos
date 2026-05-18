@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { pushMutation } from "@/store/backend";
+import { newId } from "@/lib/ids";
 
 export interface Customer {
   id: string;
@@ -27,7 +28,7 @@ export const useCustomers = create<CustomersState>()(
       customers: [],
       addCustomer: (c) => {
         const full: Customer = {
-          id: `c${Date.now()}`,
+          id: newId("c-"),
           name: c.name?.trim() || undefined,
           phone: c.phone?.trim() || undefined,
           email: c.email?.trim() || undefined,
@@ -37,16 +38,16 @@ export const useCustomers = create<CustomersState>()(
           createdAt: new Date().toISOString(),
         };
         set((s) => ({ customers: [full, ...s.customers] }));
-        pushMutation("/api/customers", "POST", full, `customer:${full.id}`);
+        void pushMutation("/api/customers", "POST", full, `customer:${full.id}`);
         return full;
       },
       updateCustomer: (id, patch) => {
         set((s) => ({ customers: s.customers.map((c) => (c.id === id ? { ...c, ...patch } : c)) }));
-        pushMutation(`/api/customers/${id}`, "PUT", patch, `customer:${id}`);
+        void pushMutation(`/api/customers/${id}`, "PUT", patch, `customer:${id}`);
       },
       deleteCustomer: (id) => {
         set((s) => ({ customers: s.customers.filter((c) => c.id !== id) }));
-        pushMutation(`/api/customers/${id}`, "DELETE", undefined, `customer:${id}`);
+        void pushMutation(`/api/customers/${id}`, "DELETE", undefined, `customer:${id}`);
       },
       applyPurchase: (id, totalPaid, pointsEarned, pointsRedeemed) =>
         set((s) => ({

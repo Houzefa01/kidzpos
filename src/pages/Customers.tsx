@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useCustomers, Customer } from "@/store/customers";
-import { useData } from "@/store/data";
+import { useSales } from "@/store/sales";
 import { useAuth } from "@/store/auth";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -18,7 +18,7 @@ export default function Customers() {
   const { user } = useAuth();
   const fmt = useFormatMoney();
   const { customers, addCustomer, updateCustomer, deleteCustomer } = useCustomers();
-  const { sales } = useData();
+  const sales = useSales((s) => s.sales);
   const isAdmin = user?.role === "ADMIN";
 
   const [search, setSearch] = useState("");

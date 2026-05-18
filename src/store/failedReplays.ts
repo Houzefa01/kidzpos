@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import { newId } from "@/lib/ids";
 
 /**
  * Mutations rejetées par le backend (4xx) au moment du flush outbox.
@@ -34,7 +35,7 @@ export const useFailedReplays = create<FailedReplaysState>()(
       add: (f) =>
         set((s) => ({
           failures: [
-            { ...f, id: `fr-${Date.now()}-${Math.random().toString(36).slice(2, 6)}` },
+            { ...f, id: newId("fr-") },
             ...s.failures,
           ].slice(0, 100),
         })),

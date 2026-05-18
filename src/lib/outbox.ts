@@ -10,6 +10,7 @@
 // l'ordre FIFO d'enqueue, donc l'âge initial dans le tri du replay).
 
 import { z } from "zod";
+import { newId } from "@/lib/ids";
 
 export interface OutboxEntry {
   id: string;
@@ -75,8 +76,10 @@ export const outbox = {
     }
     all.push({
       ...entry,
-      id: `ob-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      ts: Date.now(),
+      // P2.3 : UUID au lieu de Date.now()-random4 (collision possible si > 1
+      // enqueue/ms dans un bulk synchrone).
+      id: newId("ob-"),
+      ts: Date.now(),  // timestamp d'enqueue (sémantique horloge, pas un ID)
       retries: 0,
     });
     // I6 : FIFO bounded — on garde les MAX_ENTRIES plus récentes.

@@ -3,15 +3,17 @@ import { persist } from "zustand/middleware";
 import { broadcastSync } from "@/lib/sync";
 import { BackupSchema } from "@/lib/schemas";
 import { pushMutation } from "@/store/backend";
-import { useCustomers } from "@/store/customers";
+import { newId } from "@/lib/ids";
+// P1.3 : cycle data ↔ sales toléré — les références cross-stores ne sont lues
+// qu'à l'intérieur des actions (call time), jamais à l'init du module.
+// ESM live bindings garantissent la cohérence quand l'action est invoquée.
+import { useSales } from "@/store/sales";
 
 /** UUID stable pour l'idempotence des mouvements de stock. Identique pour tout replay
  *  d'une même mutation (le body persisté dans l'outbox conserve cet ID). */
 function makeClientMovementId(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return crypto.randomUUID();
-  }
-  return `mv-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  // P2.3 : délégué à newId — même garantie UUID + fallback HTTP LAN.
+  return newId("mv-");
 }
 
 export interface Store {
@@ -103,16 +105,12 @@ export interface ParkedCart {
 interface DataState {
   stores: Store[];
   products: Product[];
-  sales: Sale[];
   moves: StockMove[];
   parked: ParkedCart[];
-  saleSeq: Record<string, number>;
   addProduct: (p: Omit<Product, "id" | "createdAt">) => { ok: boolean; error?: string; product?: Product };
   updateProduct: (id: string, patch: Partial<Product>) => void;
   deleteProduct: (id: string) => void;
   bulkImportProducts: (rows: Omit<Product, "id" | "createdAt">[]) => { added: number; skipped: number };
-  addSale: (s: Omit<Sale, "id" | "date" | "seq">) => Sale;
-  refundSale: (id: string, by: { userId: string; userName: string }) => { ok: boolean; error?: string; refund?: Sale };
   adjustStock: (productId: string, delta: number, reason: string, by?: { userId: string; userName: string }) => { ok: boolean; error?: string };
   transferStock: (productId: string, fromStoreId: string, toStoreId: string, qty: number, by?: { userId: string; userName: string }) => { ok: boolean; error?: string };
   parkCart: (cart: Omit<ParkedCart, "id" | "createdAt">) => void;
@@ -126,159 +124,58 @@ interface DataState {
 }
 
 // État initial vide : le backend Postgres est l'unique source de vérité.
-// `syncBackend` peuple stores/products/sales/customers au démarrage et via SSE.
+// `syncBackend` peuple stores/products/customers + useSales au démarrage et via SSE.
+//
+// P1.3 : sales/saleSeq + addSale/refundSale ont été déplacés dans `@/store/sales`
+// (useSales, NON persisté). Cf src/store/sales.ts pour la justification.
 export const useData = create<DataState>()(
   persist(
     (set, get) => ({
       stores: [],
       products: [],
-      sales: [],
       moves: [],
       parked: [],
-      saleSeq: {},
 
       addProduct: (p) => {
         const existing = get().products.find(
           (x) => x.storeId === p.storeId && x.sku.toLowerCase() === p.sku.toLowerCase()
         );
         if (existing) return { ok: false, error: "Référence (SKU) déjà utilisée dans ce magasin" };
-        const product: Product = { ...p, id: `p${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, createdAt: new Date().toISOString() };
+        const product: Product = { ...p, id: newId("p-"), createdAt: new Date().toISOString() };
         set((s) => ({ products: [...s.products, product] }));
         broadcastSync("kidzpos-data");
-        pushMutation("/api/products", "POST", product, `product:${product.id}`);
+        void pushMutation("/api/products", "POST", product, `product:${product.id}`);
         return { ok: true, product };
       },
       updateProduct: (id, patch) => {
         set((s) => ({ products: s.products.map((x) => (x.id === id ? { ...x, ...patch } : x)) }));
         broadcastSync("kidzpos-data");
         const updated = get().products.find((p) => p.id === id);
-        if (updated) pushMutation(`/api/products/${id}`, "PUT", updated, `product:${id}`);
+        if (updated) void pushMutation(`/api/products/${id}`, "PUT", updated, `product:${id}`);
       },
       deleteProduct: (id) => {
         set((s) => ({ products: s.products.filter((x) => x.id !== id) }));
         broadcastSync("kidzpos-data");
-        pushMutation(`/api/products/${id}`, "DELETE", undefined, `product:${id}`);
+        void pushMutation(`/api/products/${id}`, "DELETE", undefined, `product:${id}`);
       },
       bulkImportProducts: (rows) => {
         let added = 0, skipped = 0;
-        const now = Date.now();
+        const createdAt = new Date().toISOString();
         set((s) => {
           const products = [...s.products];
-          rows.forEach((r, i) => {
+          rows.forEach((r) => {
             const dup = products.find((x) => x.storeId === r.storeId && x.sku.toLowerCase() === r.sku.toLowerCase());
             if (dup) { skipped++; return; }
-            products.push({ ...r, id: `p${now}-${i}`, createdAt: new Date().toISOString() });
+            // P2.3 : un UUID par produit (avant : `p${Date.now()}-${i}` partagé sur
+            // toute la boucle synchrone → IDs prévisibles + risque collision avec
+            // un autre import dans la même ms).
+            products.push({ ...r, id: newId("p-"), createdAt });
             added++;
           });
           return { products };
         });
         broadcastSync("kidzpos-data");
         return { added, skipped };
-      },
-      addSale: (sale) => {
-        const seq = (get().saleSeq[sale.storeId] ?? 0) + 1;
-        const full: Sale = { ...sale, id: `sale-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`, date: new Date().toISOString(), seq };
-        set((s) => {
-          const products = s.products.map((p) => {
-            const it = sale.items.find((i) => i.productId === p.id);
-            return it ? { ...p, stock: Math.max(0, p.stock - it.quantity) } : p;
-          });
-          const moves: StockMove[] = sale.items.map((it) => ({
-            id: `m${Date.now()}-${it.productId}`,
-            date: full.date,
-            productId: it.productId,
-            productName: it.name,
-            storeId: sale.storeId,
-            type: "SALE",
-            delta: -it.quantity,
-            userId: sale.userId,
-            userName: sale.userName,
-            reason: `Vente #${seq}`,
-          }));
-          return {
-            sales: [full, ...s.sales],
-            products,
-            moves: [...moves, ...s.moves].slice(0, 1000),
-            saleSeq: { ...s.saleSeq, [sale.storeId]: seq },
-          };
-        });
-        broadcastSync("kidzpos-data");
-        // Backend : POST checkout (le serveur recalcule total + décrémente stock DB).
-        // I8-FE : clientSaleId = id local → idempotence du replay outbox après reconnexion
-        // (le backend renvoie la vente existante au lieu d'en créer une nouvelle).
-        pushMutation("/api/sales/checkout", "POST", {
-          clientSaleId: full.id,
-          storeId: sale.storeId,
-          items: sale.items.map((i) => ({ productId: i.productId, quantity: i.quantity })),
-          discount: sale.discount,
-          paymentMode: sale.paymentMode,
-          amountPaid: sale.amountPaid,
-          customerId: sale.customerId,
-          pointsRedeemed: sale.pointsRedeemed,
-          currency: sale.currency,
-        }, `sale:${full.id}`);
-        return full;
-      },
-      refundSale: (id, by) => {
-        const original = get().sales.find((s) => s.id === id);
-        if (!original) return { ok: false, error: "Vente introuvable" };
-        if (original.refundedFrom) return { ok: false, error: "C'est déjà un remboursement" };
-        if (get().sales.some((s) => s.refundedFrom === id)) return { ok: false, error: "Déjà remboursée" };
-        const seq = (get().saleSeq[original.storeId] ?? 0) + 1;
-        const refund: Sale = {
-          ...original,
-          id: `sale-${Date.now()}-r`,
-          seq,
-          date: new Date().toISOString(),
-          items: original.items.map((i) => ({ ...i })),
-          subtotal: -original.subtotal,
-          discount: -original.discount,
-          total: -original.total,
-          pointsEarned: -original.pointsEarned,
-          pointsRedeemed: -original.pointsRedeemed,
-          amountPaid: -(original.amountPaid ?? original.total),
-          change: 0,
-          userId: by.userId,
-          userName: by.userName,
-          refundedFrom: original.id,
-        };
-        set((s) => {
-          // Réintégrer le stock
-          const products = s.products.map((p) => {
-            const it = original.items.find((i) => i.productId === p.id);
-            return it ? { ...p, stock: p.stock + it.quantity } : p;
-          });
-          const moves: StockMove[] = original.items.map((it) => ({
-            id: `m${Date.now()}-r-${it.productId}`,
-            date: refund.date,
-            productId: it.productId,
-            productName: it.name,
-            storeId: original.storeId,
-            type: "REFUND",
-            delta: it.quantity,
-            userId: by.userId,
-            userName: by.userName,
-            reason: `Remboursement vente #${original.seq}`,
-          }));
-          return {
-            sales: [refund, ...s.sales],
-            products,
-            moves: [...moves, ...s.moves].slice(0, 1000),
-            saleSeq: { ...s.saleSeq, [original.storeId]: seq },
-          };
-        });
-        broadcastSync("kidzpos-data");
-        // Retirer les points gagnés lors de la vente originale
-        if (original.customerId && original.pointsEarned > 0) {
-          useCustomers.getState().applyPurchase(
-            original.customerId,
-            -original.total,
-            -original.pointsEarned,
-            0
-          );
-        }
-        pushMutation("/api/sales/refund", "POST", { saleId: id }, `refund:${id}`);
-        return { ok: true, refund };
       },
       adjustStock: (productId, delta, reason, by) => {
         const p = get().products.find((x) => x.id === productId);
@@ -289,7 +186,7 @@ export const useData = create<DataState>()(
         // détecté par le backend (uk_stock_movements_client_id, V8).
         const clientMovementId = makeClientMovementId();
         const move: StockMove = {
-          id: `m${Date.now()}`,
+          id: newId("m-"),
           date: new Date().toISOString(),
           productId, productName: p.name, storeId: p.storeId,
           type: delta > 0 ? "IN" : delta < 0 ? "OUT" : "ADJUST",
@@ -300,7 +197,7 @@ export const useData = create<DataState>()(
           moves: [move, ...s.moves].slice(0, 1000),
         }));
         broadcastSync("kidzpos-data");
-        pushMutation(
+        void pushMutation(
           "/api/stock/adjust",
           "POST",
           { productId, delta, reason, clientMovementId },
@@ -323,19 +220,19 @@ export const useData = create<DataState>()(
           if (dst) {
             products = products.map((p) => (p.id === dst!.id ? { ...p, stock: p.stock + qty } : p));
           } else {
-            const id = `p${Date.now()}-t`;
+            const id = newId("p-");
             products = [...products, { ...src, id, storeId: toStoreId, stock: qty, createdAt: now }];
             dst = products[products.length - 1];
           }
           const moveOut: StockMove = {
-            id: `m${Date.now()}-out`, date: now, productId: src.id, productName: src.name,
+            id: newId("m-"), date: now, productId: src.id, productName: src.name,
             storeId: fromStoreId, toStoreId, type: "TRANSFER", delta: -qty,
             reason: `Transfert vers ${toStoreId}`, userId: by?.userId, userName: by?.userName,
           };
           return { products, moves: [moveOut, ...s.moves].slice(0, 1000) };
         });
         broadcastSync("kidzpos-data");
-        pushMutation(
+        void pushMutation(
           "/api/stock/transfer",
           "POST",
           { productId, targetStoreId: toStoreId, quantity: qty, clientMovementId },
@@ -344,7 +241,7 @@ export const useData = create<DataState>()(
         return { ok: true };
       },
       parkCart: (cart) => {
-        const full: ParkedCart = { ...cart, id: `pk${Date.now()}`, createdAt: new Date().toISOString() };
+        const full: ParkedCart = { ...cart, id: newId("pk-"), createdAt: new Date().toISOString() };
         set((s) => ({ parked: [full, ...s.parked].slice(0, 20) }));
         broadcastSync("kidzpos-data");
       },
@@ -363,18 +260,18 @@ export const useData = create<DataState>()(
         if (get().stores.some((s) => s.name.toLowerCase() === name.toLowerCase())) {
           return { ok: false, error: "Un magasin porte déjà ce nom" };
         }
-        const id = `store-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+        const id = newId("store-");
         const store: Store = { id, name, location };
         set((s) => ({ stores: [...s.stores, store] }));
         broadcastSync("kidzpos-data");
-        pushMutation("/api/stores", "POST", store, `store:${id}`);
+        void pushMutation("/api/stores", "POST", store, `store:${id}`);
         return { ok: true, store };
       },
       updateStore: (id, patch) => {
         set((s) => ({ stores: s.stores.map((x) => (x.id === id ? { ...x, ...patch } : x)) }));
         broadcastSync("kidzpos-data");
         const updated = get().stores.find((s) => s.id === id);
-        if (updated) pushMutation(`/api/stores/${id}`, "PUT", updated, `store:${id}`);
+        if (updated) void pushMutation(`/api/stores/${id}`, "PUT", updated, `store:${id}`);
       },
       deleteStore: (id) => {
         if (get().products.some((p) => p.storeId === id)) {
@@ -385,11 +282,13 @@ export const useData = create<DataState>()(
         }
         set((s) => ({ stores: s.stores.filter((x) => x.id !== id) }));
         broadcastSync("kidzpos-data");
-        pushMutation(`/api/stores/${id}`, "DELETE", undefined, `store:${id}`);
+        void pushMutation(`/api/stores/${id}`, "DELETE", undefined, `store:${id}`);
         return { ok: true };
       },
       exportAll: () => JSON.stringify({
-        stores: get().stores, products: get().products, sales: get().sales,
+        stores: get().stores,
+        products: get().products,
+        sales: useSales.getState().sales,
       }, null, 2),
       importAll: (json) => {
         try {
@@ -398,20 +297,22 @@ export const useData = create<DataState>()(
           if (!parsed.success) return { ok: false, error: "Format invalide" };
           const seq: Record<string, number> = {};
           for (const s of parsed.data.sales) seq[s.storeId] = Math.max(seq[s.storeId] ?? 0, s.seq ?? 0);
-          set({ stores: parsed.data.stores, products: parsed.data.products, sales: parsed.data.sales, saleSeq: seq });
+          set({ stores: parsed.data.stores, products: parsed.data.products });
+          useSales.getState().setAll(parsed.data.sales, seq);
           broadcastSync("kidzpos-data");
           return { ok: true };
         } catch (e: unknown) { return { ok: false, error: e instanceof Error ? e.message : "Erreur" }; }
       },
       resetAll: () => {
         // Vide l'état local : le prochain syncBackend réhydratera depuis Postgres.
-        set({ stores: [], products: [], sales: [], moves: [], parked: [], saleSeq: {} });
+        set({ stores: [], products: [], moves: [], parked: [] });
+        useSales.getState().clear();
         broadcastSync("kidzpos-data");
       },
     }),
     {
       name: "kidzpos-data",
-      version: 5,
+      version: 6,
       migrate: (persisted: unknown, version) => {
         if (!persisted || typeof persisted !== "object") return persisted;
         const state = persisted as Record<string, unknown>;
@@ -460,8 +361,22 @@ export const useData = create<DataState>()(
           state.parked = [];
           state.saleSeq = {};
         }
+        if (version < 6) {
+          // P1.3 : sales + saleSeq déplacés vers useSales (non persisté).
+          // On retire les résidus pour ne pas mentir au consumer.
+          delete state.sales;
+          delete state.saleSeq;
+        }
         return state;
       },
+      // P1.3 : whitelist explicite des champs persistés — exclut tout ajout
+      // futur de state qu'on voudrait garder volatile.
+      partialize: (state) => ({
+        stores: state.stores,
+        products: state.products,
+        moves: state.moves,
+        parked: state.parked,
+      }),
     }
   )
 );

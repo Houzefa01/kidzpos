@@ -1,6 +1,7 @@
-import { api, refreshAccessToken, tokenStore } from "@/lib/apiClient";
+import { api, refreshAccessToken, tokenStore, ApiError } from "@/lib/apiClient";
 import { useAuth } from "@/store/auth";
 import { useData } from "@/store/data";
+import { useSales } from "@/store/sales";
 import { useCustomers } from "@/store/customers";
 import { useSettings } from "@/store/settings";
 import { useBackend } from "@/store/backend";
@@ -13,73 +14,144 @@ import {
   SettingsSchema,
   UserSchema,
 } from "@/lib/schemas";
-import { z } from "zod";
+import { z, ZodSchema } from "zod";
 
 let _hydrating = false;
 let _needsRehydrate = false;
 
+/**
+ * P2.1 — Résultat unitaire d'une ressource hydratée.
+ *
+ *   { ok: true,  data }    → fetch + parse réussis, à appliquer au store
+ *   { ok: false, status }  → 401/403 → on remonte pour gérer session
+ *   { ok: false, error }   → erreur réseau, parse Zod, ou 5xx → on log + on skip
+ */
+type FetchResult<T> =
+  | { ok: true; data: T }
+  | { ok: false; status?: number; error: string };
+
+async function fetchAndParse<T>(path: string, schema: ZodSchema<T>): Promise<FetchResult<T>> {
+  try {
+    const raw = await api<unknown>(path);
+    const data = schema.parse(raw);
+    return { ok: true, data };
+  } catch (e: unknown) {
+    if (e instanceof ApiError) {
+      return { ok: false, status: e.status, error: e.message };
+    }
+    const message = e instanceof Error ? e.message : "Erreur inconnue";
+    return { ok: false, error: message };
+  }
+}
+
+/**
+ * P2.1 — Hydratation TOLÉRANTE aux pannes partielles.
+ *
+ *  - Promise.allSettled : aucune ressource ne fait tomber les autres.
+ *  - Chaque ressource est appliquée indépendamment à son store.
+ *  - 401/403 sur ≥1 ressource → session morte, on remonte une erreur dédiée.
+ *  - lanReachable ne bascule à `false` que si TOUTES les ressources critiques
+ *    ont échoué (signe d'un backend réellement injoignable, pas d'un endpoint
+ *    isolé en 500).
+ *  - Log explicite par endpoint échoué (debuggable en prod via console).
+ */
 export async function hydrateFromBackend(): Promise<{ ok: boolean; error?: string }> {
-  // P2 : si l'access token est absent (boot après reload, ou expiration silencieuse),
-  // tenter un refresh via le cookie httpOnly avant de bailer. Si l'utilisateur n'est
-  // pas authentifié du tout, refreshAccessToken renvoie null → early-return propre.
+  // Si l'access token est absent (boot après reload, ou expiration silencieuse),
+  // tenter un refresh via le cookie httpOnly avant de bailer.
   if (!tokenStore.get()) {
     const refreshed = await refreshAccessToken();
     if (!refreshed) return { ok: false, error: "Non authentifié" };
   }
   if (_hydrating) {
-    // Marquer qu'une nouvelle hydratation est requise après celle en cours
     _needsRehydrate = true;
     return { ok: false, error: "Hydratation déjà en cours — re-planifiée" };
   }
   _hydrating = true;
   try {
-    const role = useAuth.getState().user?.role;
-    const userFetch = role === "ADMIN"
-      ? api<unknown>("/api/users").catch(() => null)   // non-bloquant : l'admin peut continuer même si /users plante
-      : Promise.resolve(null);
+    const user = useAuth.getState().user;
+    const role = user?.role;
 
-    const [rawStores, rawProducts, rawSales, rawCustomers, rawSettings, rawUsers] = await Promise.all([
-      api<unknown>("/api/stores"),
-      api<unknown>("/api/products"),
-      api<unknown>("/api/sales"),
-      api<unknown>("/api/customers"),
-      api<unknown>("/api/settings"),
-      userFetch,
+    // P4 — Politique GET cross-store STRICTE côté backend : un EMPLOYEE doit
+    // expliciter `?storeId=` sur les endpoints store-scopés (products, sales).
+    // Sans ce param, le backend retourne 403 (anti-leak cross-store).
+    // ADMIN passe partout → on omet le param pour garder la sémantique "tous".
+    const storeScope = role === "EMPLOYEE" && user?.storeId
+      ? `?storeId=${encodeURIComponent(user.storeId)}`
+      : "";
+
+    // P2.1 : Promise.allSettled — toutes les ressources tentent en parallèle,
+    // aucune ne fait tomber l'ensemble.
+    const [storesR, productsR, salesR, customersR, settingsR, usersR] = await Promise.all([
+      fetchAndParse("/api/stores", z.array(StoreSchema)),
+      fetchAndParse(`/api/products${storeScope}`, z.array(ProductSchema)),
+      fetchAndParse(`/api/sales${storeScope}`, z.array(SaleSchema)),
+      fetchAndParse("/api/customers", z.array(CustomerSchema)),
+      fetchAndParse("/api/settings", SettingsSchema),
+      role === "ADMIN"
+        ? fetchAndParse("/api/users", z.array(UserSchema))
+        : Promise.resolve<FetchResult<null>>({ ok: true, data: null }),
     ]);
 
-    const stores = z.array(StoreSchema).parse(rawStores);
-    const products = z.array(ProductSchema).parse(rawProducts);
-    const sales = z.array(SaleSchema).parse(rawSales);
-    const customers = z.array(CustomerSchema).parse(rawCustomers);
-    const settings = SettingsSchema.parse(rawSettings);
+    // Session morte si AU MOINS UNE ressource auth-required renvoie 401/403.
+    // (Le backend a invalidé le token → inutile de continuer à hydrater partiellement.)
+    const authFailures = [storesR, productsR, salesR, customersR, settingsR, usersR]
+      .filter((r): r is { ok: false; status: number; error: string } =>
+        !r.ok && (r.status === 401 || r.status === 403));
+    if (authFailures.length > 0) {
+      tokenStore.set(null);
+      return { ok: false, error: "Session expirée" };
+    }
 
-    const saleSeq: Record<string, number> = {};
-    for (const s of sales) saleSeq[s.storeId] = Math.max(saleSeq[s.storeId] ?? 0, s.seq ?? 0);
+    // Application indépendante : chaque store reçoit ses données ssi le fetch est OK.
+    if (storesR.ok && productsR.ok) {
+      useData.setState({ stores: storesR.data, products: productsR.data });
+    } else if (storesR.ok) {
+      useData.setState({ stores: storesR.data });
+    } else if (productsR.ok) {
+      useData.setState({ products: productsR.data });
+    }
 
-    useData.setState({ stores, products, sales, saleSeq });
-    useCustomers.setState({ customers });
-    useSettings.setState({ settings });
-
-    if (rawUsers !== null) {
+    if (salesR.ok) {
+      const saleSeq: Record<string, number> = {};
+      for (const s of salesR.data) saleSeq[s.storeId] = Math.max(saleSeq[s.storeId] ?? 0, s.seq ?? 0);
+      useSales.getState().setAll(salesR.data, saleSeq);
+    }
+    if (customersR.ok) useCustomers.setState({ customers: customersR.data });
+    if (settingsR.ok) useSettings.setState({ settings: settingsR.data });
+    if (usersR.ok && usersR.data !== null) {
       // storeId arrive en `null` côté backend → on convertit en `null` strict pour le type User.
-      const users = z.array(UserSchema).parse(rawUsers).map((u) => ({
-        ...u,
-        storeId: u.storeId ?? null,
-      }));
+      const users = usersR.data.map((u) => ({ ...u, storeId: u.storeId ?? null }));
       useAuth.setState({ users });
+    }
+
+    // Log explicite par ressource échouée (debuggable en prod).
+    const failures: Array<{ resource: string; result: FetchResult<unknown> }> = [
+      { resource: "stores", result: storesR },
+      { resource: "products", result: productsR },
+      { resource: "sales", result: salesR },
+      { resource: "customers", result: customersR },
+      { resource: "settings", result: settingsR },
+      { resource: "users", result: usersR },
+    ].filter((x) => !x.result.ok);
+
+    for (const f of failures) {
+      const r = f.result as { ok: false; status?: number; error: string };
+      // eslint-disable-next-line no-console
+      console.warn(`[hydrate] /${f.resource} a échoué (status=${r.status ?? "n/a"}): ${r.error}`);
+    }
+
+    // P2.1 : lanReachable bascule à `false` UNIQUEMENT si TOUTES les ressources
+    // critiques ont échoué (vrai signal "backend down"). Sinon le reverse-proxy /
+    // backend répond mais a un endpoint cassé — on reste en mode online dégradé.
+    const criticalFailed = !storesR.ok && !productsR.ok && !salesR.ok && !customersR.ok && !settingsR.ok;
+    if (criticalFailed) {
+      useBackend.setState({ lanReachable: false });
+      return { ok: false, error: "Toutes les ressources critiques ont échoué" };
     }
 
     useBackend.setState({ lanReachable: true, lastSync: Date.now() });
     void startSse();
     return { ok: true };
-  } catch (e: unknown) {
-    const status = (e as { status?: number })?.status;
-    if (status === 401 || status === 403) {
-      tokenStore.set(null);
-      return { ok: false, error: "Session expirée" };
-    }
-    useBackend.setState({ lanReachable: false });
-    return { ok: false, error: e instanceof Error ? e.message : "Sync échouée" };
   } finally {
     _hydrating = false;
     // Si un event SSE a tenté d'hydrater pendant qu'on tournait → relancer

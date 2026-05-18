@@ -5,6 +5,7 @@ import { broadcastSync } from "@/lib/sync";
 import { api, tokenStore } from "@/lib/apiClient";
 import { hydrateFromBackend } from "@/lib/syncBackend";
 import { useBackend, pushMutation } from "@/store/backend";
+import { newId } from "@/lib/ids";
 
 export type Role = "ADMIN" | "EMPLOYEE";
 
@@ -145,13 +146,13 @@ export const useAuth = create<AuthState>()(
         // hashPassword retourne null si crypto.subtle indispo (HTTP non-localhost) :
         // dans ce cas on ne stocke pas de hash local, l'auth offline sera juste indispo.
         const hashed = await hashPassword(password);
-        const newUser = { ...u, email, id: `u${Date.now()}` };
+        const newUser = { ...u, email, id: newId("u-") };
         set((s) => ({
           users: [...s.users, newUser],
           passwords: hashed ? { ...s.passwords, [email]: hashed } : s.passwords,
         }));
         broadcastSync("kidzpos-auth");
-        pushMutation("/api/users", "POST", {
+        void pushMutation("/api/users", "POST", {
           name: u.name, email, password, role: u.role, storeId: u.storeId, active: u.active,
         }, `user:${newUser.id}`);
         return { ok: true };
@@ -164,7 +165,7 @@ export const useAuth = create<AuthState>()(
         }
         set((s) => ({ users: s.users.map((x) => (x.id === id ? { ...x, active: !x.active } : x)) }));
         broadcastSync("kidzpos-auth");
-        pushMutation(`/api/users/${id}`, "PUT", { active: !target.active }, `user:${id}`);
+        void pushMutation(`/api/users/${id}`, "PUT", { active: !target.active }, `user:${id}`);
         return { ok: true };
       },
       updateUser: (id, patch) => {
@@ -186,7 +187,7 @@ export const useAuth = create<AuthState>()(
             : s.passwords,
         }));
         broadcastSync("kidzpos-auth");
-        pushMutation(`/api/users/${id}`, "PUT", { ...patch, email: newEmail }, `user:${id}`);
+        void pushMutation(`/api/users/${id}`, "PUT", { ...patch, email: newEmail }, `user:${id}`);
         return { ok: true };
       },
       deleteUser: (id) => {
@@ -201,7 +202,7 @@ export const useAuth = create<AuthState>()(
           return { users: s.users.filter((x) => x.id !== id), passwords };
         });
         broadcastSync("kidzpos-auth");
-        pushMutation(`/api/users/${id}`, "DELETE", undefined, `user:${id}`);
+        void pushMutation(`/api/users/${id}`, "DELETE", undefined, `user:${id}`);
         return { ok: true };
       },
       setPassword: async (email, password) => {
@@ -220,7 +221,7 @@ export const useAuth = create<AuthState>()(
         }
         broadcastSync("kidzpos-auth");
         const u = get().users.find((x) => x.email.toLowerCase() === e);
-        if (u) pushMutation(`/api/users/${u.id}`, "PUT", { password }, `user:${u.id}`);
+        if (u) void pushMutation(`/api/users/${u.id}`, "PUT", { password }, `user:${u.id}`);
       },
     }),
     {

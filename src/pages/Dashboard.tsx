@@ -1,5 +1,6 @@
 import { useAuth } from "@/store/auth";
 import { useData } from "@/store/data";
+import { useSales } from "@/store/sales";
 import { useSettings } from "@/store/settings";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -11,7 +12,8 @@ import { PageHeader, Section, Stat, Grid, EmptyState } from "@/components/ds";
 
 export default function Dashboard() {
   const { user } = useAuth();
-  const { products, sales, stores } = useData();
+  const { products, stores } = useData();
+  const sales = useSales((s) => s.sales);
   const { settings } = useSettings();
   const fmt = useFormatMoney();
 

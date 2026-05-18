@@ -3,6 +3,7 @@ import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { useHotkeys } from "@/hooks/useHotkeys";
 import { useAuth } from "@/store/auth";
 import { useData, Product, SaleItem, Sale, PaymentMode } from "@/store/data";
+import { useSales } from "@/store/sales";
 import { useSettings } from "@/store/settings";
 import { useExchange } from "@/store/exchange";
 import { useCustomers, Customer } from "@/store/customers";
@@ -23,7 +24,8 @@ import { Button, CategoryIcon, PageHeader, SearchInput, FilterSelect, KbdHint, R
 export default function POS() {
   const { user } = useAuth();
   const fmt = useFormatMoney();
-  const { products, stores, addSale, addProduct, parked, parkCart, unparkCart } = useData();
+  const { products, stores, addProduct, parked, parkCart, unparkCart } = useData();
+  const addSale = useSales((s) => s.addSale);
   const { settings } = useSettings();
   const rate = useExchange((s) => s.rate);
   const { applyPurchase } = useCustomers();

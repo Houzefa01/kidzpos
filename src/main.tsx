@@ -35,8 +35,9 @@ queueMicrotask(async () => {
   startBackendWatcher();
   startMetricsReporter();
   if (navigator.onLine) {
-    useExchange.getState().refresh(true);
+    // fire-and-forget : refresh du taux EUR/AR est best-effort
+    void useExchange.getState().refresh(true);
   }
 });
 
-window.addEventListener("online", () => useExchange.getState().refresh(true));
+window.addEventListener("online", () => void useExchange.getState().refresh(true));

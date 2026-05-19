@@ -1,6 +1,8 @@
 package com.kidzpos.observability;
 
 import com.kidzpos.events.EventBus;
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.actuate.health.Health;
 import org.springframework.boot.actuate.health.HealthIndicator;
@@ -38,24 +40,52 @@ public class SseHealthIndicator implements HealthIndicator {
     private final long staleSeconds;
 
     public SseHealthIndicator(EventBus bus,
-                              @Value("${kidzpos.health.sse-stale-seconds:90}") long staleSeconds) {
+                              @Value("${kidzpos.health.sse-stale-seconds:90}") long staleSeconds,
+                              MeterRegistry meterRegistry) {
         this.bus = bus;
         this.staleSeconds = Math.max(60, staleSeconds);  // minimum 1 min pour éviter les faux positifs au boot
+
+        // PR sse-alerting — gauges Micrometer exposés via /actuator/prometheus
+        // pour alerting PromQL (cf ops/prometheus/alerts.yml). On expose 3 gauges :
+        //   bus_up                          : 1 si bus sain, 0 si stale → alerte critique
+        //   subscribers                     : nb de clients SSE connectés → dashboard
+        //   seconds_since_last_broadcast    : âge du dernier tick → alerte proactive
+        //                                     avant que bus_up ne tombe à 0
+        Gauge.builder("kidzpos.sse.bus_up", this, h -> h.isHealthy() ? 1.0 : 0.0)
+                .description("État du bus SSE : 1 = sain, 0 = stale (heartbeater bloqué)")
+                .register(meterRegistry);
+        Gauge.builder("kidzpos.sse.subscribers", bus, b -> (double) b.subscribers())
+                .description("Nombre de clients SSE actuellement connectés")
+                .register(meterRegistry);
+        Gauge.builder("kidzpos.sse.seconds_since_last_broadcast", this,
+                        h -> h.ageSeconds())
+                .description("Temps écoulé (s) depuis le dernier broadcast SSE (ping ou change)")
+                .baseUnit("seconds")
+                .register(meterRegistry);
+    }
+
+    /** Vrai ssi le dernier broadcast est dans la fenêtre {@link #staleSeconds}. */
+    boolean isHealthy() {
+        return ageSeconds() <= staleSeconds;
+    }
+
+    /** Secondes depuis le dernier broadcast, clampé à 0 (anti-clock-skew). */
+    double ageSeconds() {
+        long ageMs = Math.max(0, System.currentTimeMillis() - bus.lastBroadcastAt());
+        return ageMs / 1000.0;
     }
 
     @Override
     public Health health() {
-        long now = System.currentTimeMillis();
-        long ageMs = Math.max(0, now - bus.lastBroadcastAt());
-        long ageSeconds = ageMs / 1000;
+        long ageSecondsLong = (long) ageSeconds();
         int subscribers = bus.subscribers();
 
-        Health.Builder builder = ageSeconds <= staleSeconds ? Health.up() : Health.down();
+        Health.Builder builder = isHealthy() ? Health.up() : Health.down();
 
         return builder
                 .withDetail("subscribers", subscribers)
                 .withDetail("lastBroadcastAt", Instant.ofEpochMilli(bus.lastBroadcastAt()).toString())
-                .withDetail("secondsSinceLastBroadcast", ageSeconds)
+                .withDetail("secondsSinceLastBroadcast", ageSecondsLong)
                 .withDetail("staleAfterSeconds", staleSeconds)
                 .withDetail("heartbeatPeriodSeconds", Duration.ofSeconds(30).getSeconds())
                 .build();

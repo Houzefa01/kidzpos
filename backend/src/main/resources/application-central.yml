@@ -1,0 +1,43 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Profil "central" — serveur online qui agrégera la donnée de tous les magasins.
+#
+# Activation :
+#   java -jar kidzpos-backend.jar --spring.profiles.active=central
+#   ou : SPRING_PROFILES_ACTIVE=central java -jar ...
+#
+# Hérite de application.yml. Différences vs. "local" :
+#   - port distinct par défaut (8090) pour pouvoir cohabiter avec un local
+#     pendant le développement.
+#   - datasource distincte (DB "kidzpos_central" par défaut).
+#
+# IMPORTANT : ce profil ne change PAS encore le comportement applicatif.
+# Les endpoints /api/sync (ETAPE 4) sont exposés des deux côtés ; c'est la
+# couche métier de synchro (future PR) qui distinguera les rôles.
+# ─────────────────────────────────────────────────────────────────────────────
+
+server:
+  port: ${SERVER_PORT:8090}
+
+spring:
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:kidzpos_central}
+    username: ${DB_USER:kidzpos}
+    password: ${DB_PASSWORD:kidzpos}
+
+kidzpos:
+  node:
+    role: central
+    id: ${KIDZPOS_NODE_ID:central-default}
+    # V18 — Le central ne sert PAS un magasin spécifique : il agrège.
+    # Laisser vide → NodeContext.isStoreScoped()=false → comportement
+    # rétrocompatible (pas de tag store_id sur les rares opérations qui
+    # pourraient y être journalisées localement, et pas de garde cross-store).
+    store-id: ${KIDZPOS_NODE_STORE_ID:}
+  # Le central RECOIT les push : push.enabled reste false (il ne push pas).
+  # `inbound.api-key` doit être fourni via env pour activer l'auth par API-KEY ;
+  # sinon seul un appel JWT ROLE_ADMIN sera accepté sur /api/sync/push.
+  sync:
+    push:
+      enabled: false
+    inbound:
+      api-key: ${KIDZPOS_SYNC_INBOUND_API_KEY:}

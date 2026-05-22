@@ -37,7 +37,11 @@ public class Dtos {
             @NotBlank String sku
     ) {}
 
-    public record CustomerReq(String id, String name, String phone, String email, Integer points) {}
+    public record CustomerReq(String id, String name, String phone, String email, Integer points,
+                              /** V21-bidir : storeId optionnel — permet à un admin
+                               *  sur le central de cibler un magasin précis. NULL =
+                               *  retombe sur NodeContext (cas local store). */
+                              String storeId) {}
 
     public record SaleItemReq(@NotBlank String productId, @Min(1) int quantity) {}
 

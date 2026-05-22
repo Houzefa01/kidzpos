@@ -10,6 +10,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter;
+import com.kidzpos.sync.SyncApiKeyFilter;
 
 @Configuration
 public class SecurityConfig {
@@ -22,7 +23,8 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http, JwtAuthFilter jwtFilter,
                                            LoginRateLimitFilter loginRateLimitFilter,
-                                           RefreshRateLimitFilter refreshRateLimitFilter) throws Exception {
+                                           RefreshRateLimitFilter refreshRateLimitFilter,
+                                           SyncApiKeyFilter syncApiKeyFilter) throws Exception {
         http
             .csrf(c -> c.disable())
             .cors(c -> {})
@@ -86,6 +88,9 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.POST, "/api/stores/**").hasRole("ADMIN")
                 .requestMatchers(HttpMethod.PUT, "/api/stores/**").hasRole("ADMIN")
                 .requestMatchers(HttpMethod.DELETE, "/api/stores/**").hasRole("ADMIN")
+                // ETAPE 4 — endpoints de synchronisation local ↔ central.
+                // Stubs aujourd'hui ; destinés à être appelés par un démon, pas par les caissiers.
+                .requestMatchers("/api/sync/**").hasRole("ADMIN")
                 .anyRequest().authenticated()
             )
             // Les deux filtres sont placés avant le filtre canonique Spring Security
@@ -95,7 +100,11 @@ public class SecurityConfig {
             // pas de header Authorization), et jwt ne s'active qu'avec un header.
             .addFilterBefore(loginRateLimitFilter, UsernamePasswordAuthenticationFilter.class)
             .addFilterBefore(refreshRateLimitFilter, UsernamePasswordAuthenticationFilter.class)
-            .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
+            .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)
+            // SyncApiKeyFilter APRÈS JwtAuthFilter : si un appel arrive avec un JWT
+            // valide, le contexte est déjà peuplé et le filtre ne fait rien. Sinon
+            // (cas server-to-server), il pose ROLE_ADMIN après validation du header.
+            .addFilterAfter(syncApiKeyFilter, JwtAuthFilter.class);
         return http.build();
     }
 }

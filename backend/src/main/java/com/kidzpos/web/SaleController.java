@@ -6,6 +6,8 @@ import com.kidzpos.observability.BusinessMetrics;
 import com.kidzpos.repo.*;
 import com.kidzpos.security.JwtAuthFilter.AuthPrincipal;
 import com.kidzpos.security.StoreAccessGuard;
+import com.kidzpos.sync.NodeContext;
+import com.kidzpos.sync.OperationLogService;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -36,16 +38,22 @@ public class SaleController {
     private final StockMovementRepository moves;
     private final com.kidzpos.events.EventBus bus;
     private final BusinessMetrics metrics;
+    private final OperationLogService opLog;
+    private final NodeContext nodeContext;
     private final TransactionTemplate tx;
 
     public SaleController(SaleRepository sales, ProductRepository products,
                           CustomerRepository customers, SettingsRepository settingsRepo,
                           StockMovementRepository moves, com.kidzpos.events.EventBus bus,
                           BusinessMetrics metrics,
+                          OperationLogService opLog,
+                          NodeContext nodeContext,
                           PlatformTransactionManager txm) {
         this.sales = sales; this.products = products;
         this.customers = customers; this.settingsRepo = settingsRepo;
         this.moves = moves; this.bus = bus; this.metrics = metrics;
+        this.opLog = opLog;
+        this.nodeContext = nodeContext;
         this.tx = new TransactionTemplate(txm);
     }
 
@@ -65,20 +73,33 @@ public class SaleController {
                        @AuthenticationPrincipal AuthPrincipal me) {
         var deny = StoreAccessGuard.denyIfCrossStore(me, storeId);
         if (deny != null) return deny;
+        // V19-audit — enforceStoreScope force le storeId du nœud sur tout local
+        // store-scoped, peu importe ce qui est demandé. Sur central, conserve
+        // le comportement legacy (storeId optionnel).
+        String scope = StoreAccessGuard.enforceStoreScope(storeId, me, nodeContext);
         if (page == null) {
-            return storeId == null
+            return scope == null
                     ? sales.findAllByOrderByDateDesc()
-                    : sales.findByStoreIdOrderByDateDesc(storeId);
+                    : sales.findByStoreIdOrderByDateDesc(scope);
         }
         var pageable = org.springframework.data.domain.PageRequest.of(Math.max(0, page), Math.min(500, Math.max(1, size)));
-        return storeId == null
+        return scope == null
                 ? sales.findAllByOrderByDateDesc(pageable)
-                : sales.findByStoreIdOrderByDateDesc(storeId, pageable);
+                : sales.findByStoreIdOrderByDateDesc(scope, pageable);
     }
 
+    /**
+     * V19 — Durcissement : 404 si la vente appartient à un autre magasin sur
+     * un nœud store-scoped (sinon comportement legacy via StoreAccessGuard).
+     * Évite une fuite d'information silencieuse via ce read-by-ID.
+     */
     @GetMapping("/{id}")
-    public ResponseEntity<Sale> get(@PathVariable String id) {
-        return sales.findById(id).map(ResponseEntity::ok).orElse(ResponseEntity.notFound().build());
+    public ResponseEntity<Sale> get(@PathVariable String id,
+                                    @AuthenticationPrincipal AuthPrincipal me) {
+        return sales.findById(id)
+                .filter(s -> StoreAccessGuard.isInScope(s.getStoreId(), me, nodeContext))
+                .map(ResponseEntity::ok)
+                .orElse(ResponseEntity.notFound().build());
     }
 
     @PostMapping("/checkout")
@@ -105,9 +126,12 @@ public class SaleController {
         Settings s = settingsRepo.findById(1L).orElseThrow();
 
         // Charger produits + valider stock
+        // V19-audit — Lookup STRICTEMENT scoped par req.storeId() (déjà gardé en amont
+        // contre cross-store). Empêche un caissier de vendre/décrémenter un produit
+        // appartenant à un autre magasin même s'il connaît son ID.
         Map<String, Product> prodMap = new HashMap<>();
         for (var it : req.items()) {
-            var p = products.findById(it.productId()).orElse(null);
+            var p = products.findByIdAndStoreId(it.productId(), req.storeId()).orElse(null);
             if (p == null) return ResponseEntity.badRequest().body(Map.of("error", "Produit introuvable: " + it.productId()));
             if (p.getStock() < it.quantity()) return ResponseEntity.badRequest().body(Map.of("error", "Stock insuffisant: " + p.getName()));
             prodMap.put(p.getId(), p);
@@ -134,11 +158,13 @@ public class SaleController {
         }
 
         // B5 : redeem possible uniquement si client identifié + points effectivement détenus
+        // V19-audit — Lookup customer strictement scoped (tolérance legacy NULL préservée).
+        // Empêche un caissier de débiter des points d'un client d'un autre magasin.
         if (req.pointsRedeemed() > 0) {
             if (req.customerId() == null) {
                 return ResponseEntity.badRequest().body(Map.of("error", "Client requis pour utiliser des points"));
             }
-            var c = customers.findById(req.customerId()).orElse(null);
+            var c = customers.findByIdAndStoreIdOrLegacy(req.customerId(), req.storeId()).orElse(null);
             if (c == null) {
                 return ResponseEntity.badRequest().body(Map.of("error", "Client introuvable"));
             }
@@ -196,8 +222,9 @@ public class SaleController {
         }
 
         // Client / fidélité
+        // V19-audit — Lookup strictement scoped (tolérance legacy NULL préservée).
         if (req.customerId() != null) {
-            customers.findById(req.customerId()).ifPresent(c -> {
+            customers.findByIdAndStoreIdOrLegacy(req.customerId(), req.storeId()).ifPresent(c -> {
                 c.setPoints(Math.max(0, c.getPoints() + pointsEarned - req.pointsRedeemed()));
                 c.setTotalSpent(round(c.getTotalSpent() + total));
                 c.setVisits(c.getVisits() + 1);
@@ -209,6 +236,8 @@ public class SaleController {
         // saveAndFlush : déclenche la contrainte uk_sale_store_seq dans cette transaction
         // (sans flush, l'erreur surviendrait au commit, hors du try/catch du retry).
         var saved = sales.saveAndFlush(sale);
+        // ETAPE 3 — journal d'opérations (best-effort, n'interrompt pas le checkout).
+        opLog.record("sale.checkout", saved);
         bus.publish("sale", "created", saved);
         bus.publish("product", "bulkUpdated", null);
         return ResponseEntity.ok(saved);
@@ -267,6 +296,8 @@ public class SaleController {
             });
         }
         var saved = sales.saveAndFlush(refund);
+        // ETAPE 3 — journal d'opérations (best-effort).
+        opLog.record("sale.refund", saved);
         bus.publish("sale", "refunded", saved);
         bus.publish("product", "bulkUpdated", null);
         return ResponseEntity.ok(saved);

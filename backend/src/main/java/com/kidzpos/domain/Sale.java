@@ -45,4 +45,19 @@ public class Sale {
      *  (cf V5) ; ce champ sert au rendu du reçu/historique avec la devise d'origine
      *  même si l'opérateur change la devise globale ultérieurement. */
     @Column(nullable = false, length = 10) @Builder.Default private String currency = "AR";
+
+    /**
+     * V20 — Horodatage (= date de création pour Sale, car les ventes sont
+     * immutables : un refund crée une NOUVELLE ligne avec refundedFrom pointant
+     * l'originale, jamais d'UPDATE). Conservé pour cohérence avec Product/Customer
+     * et future traçabilité ops. NULL pour les lignes pré-V20.
+     */
+    @Column(name = "updated_at")
+    private Instant updatedAt;
+
+    @PrePersist
+    @PreUpdate
+    void touchUpdatedAt() {
+        this.updatedAt = Instant.now();
+    }
 }

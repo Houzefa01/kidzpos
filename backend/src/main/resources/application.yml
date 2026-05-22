@@ -120,3 +120,62 @@ kidzpos:
   exchange:
     # Taux EUR -> Ariary par défaut (mis à jour si internet via /api/exchange/refresh)
     eur-to-ar-default: 4900
+  # ─── Synchronisation local ↔ central ───────────────────────────────────────
+  # Par défaut DÉSACTIVÉE → SyncPushService + SyncScheduler ne sont même pas
+  # instanciés (cf @ConditionalOnProperty). Le central, lui, accepte les push
+  # tant que /api/sync/push est appelable (auth ADMIN ou X-Sync-Api-Key).
+  #
+  # Activation côté magasin : kidzpos.sync.push.enabled=true (cf application-local.yml).
+  # Le central garde push.enabled=false : il ne push vers personne, il reçoit.
+  sync:
+    push:
+      enabled: ${KIDZPOS_SYNC_PUSH_ENABLED:false}
+      central-url: ${KIDZPOS_SYNC_CENTRAL_URL:}
+      api-key: ${KIDZPOS_SYNC_API_KEY:}
+      batch-size: ${KIDZPOS_SYNC_BATCH_SIZE:20}
+      timeout-ms: ${KIDZPOS_SYNC_TIMEOUT_MS:3000}
+      interval-ms: ${KIDZPOS_SYNC_INTERVAL_MS:30000}
+      initial-delay-ms: ${KIDZPOS_SYNC_INITIAL_DELAY_MS:10000}
+      # ── Retry à backoff exponentiel (cf SyncPushService) ─────────────────
+      # base-backoff-ms : délai après le 1er échec d'un item (= 1 tick par défaut)
+      # max-backoff-ms  : plafond (les essais subséquents ne dépassent pas)
+      # max-attempts    : 0 = illimité soft (jamais frozen). >0 = au-delà, l'item
+      #                   reste en base avec synced=false mais n'est plus retenté
+      #                   (FROZEN) — nécessite intervention manuelle.
+      retry:
+        base-backoff-ms: ${KIDZPOS_SYNC_RETRY_BASE_MS:30000}
+        max-backoff-ms: ${KIDZPOS_SYNC_RETRY_MAX_MS:600000}
+        max-attempts: ${KIDZPOS_SYNC_RETRY_MAX_ATTEMPTS:0}
+    # ─── Pull central → local ────────────────────────────────────────────────
+    # Désactivé par défaut. Les beans SyncPullService + SyncPullScheduler ne
+    # sont créés que si enabled=true → ZÉRO impact runtime sans cette propriété.
+    # Activé par défaut sur le profil local (cf application-local.yml).
+    # Le central n'a aucune raison d'activer pull (il N'a personne au-dessus).
+    #
+    # central-url + api-key partagent les mêmes vars d'env que push (un seul
+    # serveur central, un seul secret partagé) — override possible si besoin.
+    pull:
+      enabled: ${KIDZPOS_SYNC_PULL_ENABLED:false}
+      central-url: ${KIDZPOS_SYNC_CENTRAL_URL:}
+      api-key: ${KIDZPOS_SYNC_API_KEY:}
+      batch-size: ${KIDZPOS_SYNC_PULL_BATCH_SIZE:100}
+      timeout-ms: ${KIDZPOS_SYNC_PULL_TIMEOUT_MS:5000}
+      interval-ms: ${KIDZPOS_SYNC_PULL_INTERVAL_MS:60000}
+      initial-delay-ms: ${KIDZPOS_SYNC_PULL_INITIAL_DELAY_MS:15000}
+    # Clé attendue côté central pour authentifier les push entrants.
+    # Vide → l'authentification par API-KEY est désactivée (seul JWT ADMIN passe).
+    inbound:
+      api-key: ${KIDZPOS_SYNC_INBOUND_API_KEY:}
+    # ─── Application des événements sync_inbox → métier local ────────────────
+    # Désactivé par défaut. SyncInboxProcessor + SyncInboxScheduler ne sont créés
+    # que si enabled=true. Activé par défaut sur le profil local (cf application-local.yml).
+    #
+    # WHITELIST = ensemble des @Component InboxHandler chargés. Aujourd'hui :
+    #   product.created, product.updated, stock.adjusted
+    # Tout type hors whitelist → la ligne reste à processed=false avec un WARN
+    # (ne bloque pas le reste du batch).
+    inbox:
+      enabled: ${KIDZPOS_SYNC_INBOX_ENABLED:false}
+      batch-size: ${KIDZPOS_SYNC_INBOX_BATCH_SIZE:50}
+      interval-ms: ${KIDZPOS_SYNC_INBOX_INTERVAL_MS:60000}
+      initial-delay-ms: ${KIDZPOS_SYNC_INBOX_INITIAL_DELAY_MS:20000}

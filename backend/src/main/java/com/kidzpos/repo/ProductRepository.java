@@ -13,6 +13,14 @@ public interface ProductRepository extends JpaRepository<Product, String> {
     Optional<Product> findByStoreIdAndSkuIgnoreCase(String storeId, String sku);
 
     /**
+     * V19-audit — Lookup par ID strictement scoped par store.
+     * Utilisé par {@code SaleController.doCheckout} et autres call-sites qui
+     * doivent refuser de charger un produit cross-store, même connu en base.
+     * Retourne empty si l'id n'existe pas OU appartient à un autre magasin.
+     */
+    Optional<Product> findByIdAndStoreId(String id, String storeId);
+
+    /**
      * Décrémente le stock atomiquement uniquement si {@code stock >= qty}.
      * Retourne le nombre de lignes modifiées : 0 = stock insuffisant, 1 = OK.
      * Indispensable contre les checkouts concurrents (B6).

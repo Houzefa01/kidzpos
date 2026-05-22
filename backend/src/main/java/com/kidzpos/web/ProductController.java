@@ -7,6 +7,7 @@ import com.kidzpos.observability.BusinessMetrics;
 import com.kidzpos.repo.ProductRepository;
 import com.kidzpos.security.JwtAuthFilter.AuthPrincipal;
 import com.kidzpos.security.StoreAccessGuard;
+import com.kidzpos.sync.NodeContext;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -28,8 +29,11 @@ public class ProductController {
     private final ProductRepository repo;
     private final EventBus bus;
     private final BusinessMetrics metrics;
-    public ProductController(ProductRepository repo, EventBus bus, BusinessMetrics metrics) {
+    private final NodeContext nodeContext;
+    public ProductController(ProductRepository repo, EventBus bus, BusinessMetrics metrics,
+                             NodeContext nodeContext) {
         this.repo = repo; this.bus = bus; this.metrics = metrics;
+        this.nodeContext = nodeContext;
     }
 
     /**
@@ -48,7 +52,11 @@ public class ProductController {
                                   @AuthenticationPrincipal AuthPrincipal me) {
         var deny = StoreAccessGuard.denyIfCrossStore(me, storeId);
         if (deny != null) return deny;
-        var products = storeId == null ? repo.findAll() : repo.findByStoreId(storeId);
+        // V19-audit — Sur nœud store-scoped, on FORCE le storeId du nœud quoi qu'on
+        // demande (ignore storeId=null pour ADMIN). Empêche toute fuite cross-store
+        // via les listings, même en cas de DB pollée par un bug de sync.
+        String scope = StoreAccessGuard.enforceStoreScope(storeId, me, nodeContext);
+        var products = scope == null ? repo.findAll() : repo.findByStoreId(scope);
         String etag = collectionEtag(products);
         if (etag.equals(ifNoneMatch)) {
             // 304 doit ré-émettre l'ETag (RFC 7232 §4.1) et un body vide.
@@ -77,10 +85,17 @@ public class ProductController {
         return "W/\"" + products.size() + "-" + Long.toHexString(crc.getValue()) + "\"";
     }
 
-    /** Variant GET unique : retourne ETag = version pour permettre If-Match au PUT. */
+    /** Variant GET unique : retourne ETag = version pour permettre If-Match au PUT.
+     *
+     *  V19 — Durcissement : si on est sur un nœud store-scoped, un produit
+     *  appartenant à un autre magasin renvoie 404 (pas le contenu). Évite
+     *  une fuite d'information silencieuse via ce read-by-ID.
+     */
     @GetMapping("/{id}")
-    public ResponseEntity<Product> getOne(@PathVariable String id) {
+    public ResponseEntity<Product> getOne(@PathVariable String id,
+                                          @AuthenticationPrincipal AuthPrincipal me) {
         return repo.findById(id)
+                .filter(p -> StoreAccessGuard.isInScope(p.getStoreId(), me, nodeContext))
                 .map(p -> ResponseEntity.ok()
                         .header(HttpHeaders.ETAG, etagOf(p))
                         .body(p))
@@ -168,9 +183,16 @@ public class ProductController {
     }
 
     @DeleteMapping("/{id}")
-    public ResponseEntity<?> delete(@PathVariable String id) {
+    public ResponseEntity<?> delete(@PathVariable String id,
+                                    @AuthenticationPrincipal AuthPrincipal me) {
         var p = repo.findById(id).orElse(null);
         if (p == null) return ResponseEntity.notFound().build();
+        // V19 — Garde scope : même un ADMIN sur le serveur du magasin s1 ne
+        // peut pas soft-deleter un produit du magasin s2. 404 (pas 403) pour
+        // ne pas révéler l'existence.
+        if (!StoreAccessGuard.isInScope(p.getStoreId(), me, nodeContext)) {
+            return ResponseEntity.notFound().build();
+        }
         // Soft-delete : préserve l'intégrité référentielle avec sale_items.product_id
         // (pas de FK mais on garde la trace) et libère le SKU via l'index partiel.
         p.setDeletedAt(Instant.now());

@@ -24,24 +24,35 @@ import java.time.Duration;
 @Component
 public class RefreshCookie {
 
-    public static final String NAME = "kidzpos_rt";
+    /** Path FIXÉ (les controllers de refresh sont sous /api/auth). */
     public static final String PATH = "/api/auth";
 
+    /**
+     * V21-fix : nom du cookie CONFIGURABLE. Permet de faire cohabiter plusieurs
+     * backends sur le même hostname (test multi-serveur local) sans qu'ils
+     * s'écrasent mutuellement leur cookie de refresh.
+     *   - central : kidzpos.auth.cookie-name=kidzpos_rt_central
+     *   - store s1 : kidzpos.auth.cookie-name=kidzpos_rt_s1
+     * Défaut conservé "kidzpos_rt" pour rétrocompat prod.
+     */
+    private final String name;
     private final boolean secure;
     private final String sameSite;
     private final long maxAgeSec;
 
     public RefreshCookie(
+            @Value("${kidzpos.auth.cookie-name:kidzpos_rt}") String name,
             @Value("${kidzpos.auth.cookie-secure:false}") boolean secure,
             @Value("${kidzpos.auth.cookie-same-site:Lax}") String sameSite,
             @Value("${kidzpos.auth.refresh-token-days:30}") long days) {
+        this.name = name;
         this.secure = secure;
         this.sameSite = sameSite;
         this.maxAgeSec = Duration.ofDays(days).toSeconds();
     }
 
     public void set(HttpServletResponse res, String cleartext) {
-        ResponseCookie cookie = ResponseCookie.from(NAME, cleartext)
+        ResponseCookie cookie = ResponseCookie.from(name, cleartext)
                 .httpOnly(true)
                 .secure(secure)
                 .sameSite(sameSite)
@@ -52,7 +63,7 @@ public class RefreshCookie {
     }
 
     public void clear(HttpServletResponse res) {
-        ResponseCookie cookie = ResponseCookie.from(NAME, "")
+        ResponseCookie cookie = ResponseCookie.from(name, "")
                 .httpOnly(true)
                 .secure(secure)
                 .sameSite(sameSite)
@@ -66,7 +77,7 @@ public class RefreshCookie {
         Cookie[] cookies = req.getCookies();
         if (cookies == null) return null;
         for (Cookie c : cookies) {
-            if (NAME.equals(c.getName())) return c.getValue();
+            if (name.equals(c.getName())) return c.getValue();
         }
         return null;
     }

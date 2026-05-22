@@ -5,6 +5,8 @@ import com.kidzpos.domain.User;
 import com.kidzpos.dto.Dtos.*;
 import com.kidzpos.repo.UserRepository;
 import com.kidzpos.security.UserCache;
+import com.kidzpos.sync.NodeContext;
+import com.kidzpos.sync.OperationLogService;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -21,11 +23,21 @@ public class UserController {
     private final PasswordEncoder encoder;
     private final EventBus bus;
     private final UserCache userCache;
+    private final NodeContext nodeContext;
+    private final OperationLogService opLog;
 
-    public UserController(UserRepository users, PasswordEncoder encoder, EventBus bus, UserCache userCache) {
+    public UserController(UserRepository users, PasswordEncoder encoder, EventBus bus, UserCache userCache,
+                          NodeContext nodeContext, OperationLogService opLog) {
         this.users = users; this.encoder = encoder; this.bus = bus; this.userCache = userCache;
+        this.nodeContext = nodeContext;
+        this.opLog = opLog;
     }
 
+    /**
+     * V22 — Admin (seul à accéder à cet endpoint via UI) voit TOUS les users
+     * de TOUS les stores. La filtration V19 par nœud était trop stricte pour
+     * la console admin globale.
+     */
     @GetMapping
     public List<UserRes> list() {
         return users.findAll().stream().map(AuthController::toRes).toList();
@@ -46,6 +58,9 @@ public class UserController {
                 .active(req.active() == null ? true : req.active())
                 .build();
         var saved = users.save(u);
+        // V23 — journalise pour sync : le User complet (avec passwordHash) part
+        // dans operation_log → matérialisé sur les autres nœuds.
+        opLog.record("user.created", saved);
         var res = AuthController.toRes(saved);
         bus.publish("user", "created", res);
         return ResponseEntity.ok(res);
@@ -68,9 +83,9 @@ public class UserController {
         if (req.active() != null) u.setActive(req.active());
         if (req.password() != null && !req.password().isBlank()) u.setPasswordHash(encoder.encode(req.password()));
         var saved = users.save(u);
-        // Invalide le cache JwtAuthFilter immédiatement — la prochaine requête
-        // re-fetch l'entité fraîche (active flag, role, storeId potentiellement changés).
         userCache.invalidate(id);
+        // V23 — journalise pour sync.
+        opLog.record("user.updated", saved);
         var res = AuthController.toRes(saved);
         bus.publish("user", "updated", res);
         return ResponseEntity.ok(res);
@@ -84,9 +99,10 @@ public class UserController {
             return ResponseEntity.badRequest().body(java.util.Map.of("error", "Impossible : dernier admin"));
         }
         users.deleteById(id);
-        // Invalide le cache : tout JWT de cet user émis avant la suppression
-        // se verra désormais refuser l'auth (cache miss → repo empty → no auth set).
         userCache.invalidate(id);
+        // V23 — journalise pour sync (id + storeId pour le routage du pull).
+        opLog.record("user.deleted",
+                java.util.Map.of("id", id, "storeId", u.getStoreId() == null ? "" : u.getStoreId()));
         bus.publish("user", "deleted", java.util.Map.of("id", id));
         return ResponseEntity.noContent().build();
     }

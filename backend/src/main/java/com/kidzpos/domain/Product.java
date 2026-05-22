@@ -36,4 +36,20 @@ public class Product {
     @Column(nullable = false)
     @Builder.Default
     private Integer version = 0;
+
+    /**
+     * V20 — Horodatage de la dernière modification (auto via {@link #touchUpdatedAt()}).
+     * Utilisé par {@code ProductUpdatedHandler} pour détecter les events
+     * obsolètes (local plus récent que remote) et journaliser le conflit.
+     * NULL pour les lignes pré-V20 → traité comme "ancien" (l'event remote
+     * est appliqué sans conflit, compat ascendante).
+     */
+    @Column(name = "updated_at")
+    private Instant updatedAt;
+
+    @PrePersist
+    @PreUpdate
+    void touchUpdatedAt() {
+        this.updatedAt = Instant.now();
+    }
 }

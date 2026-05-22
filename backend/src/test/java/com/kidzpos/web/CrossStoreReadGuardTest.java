@@ -8,6 +8,8 @@ import com.kidzpos.repo.SaleRepository;
 import com.kidzpos.repo.SettingsRepository;
 import com.kidzpos.repo.StockMovementRepository;
 import com.kidzpos.security.JwtAuthFilter.AuthPrincipal;
+import com.kidzpos.sync.NodeContext;
+import com.kidzpos.sync.OperationLogService;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
@@ -45,7 +47,8 @@ class CrossStoreReadGuardTest {
     @Test
     void productList_employeeWithoutStoreId_returns403() {
         ProductController c = new ProductController(
-                mock(ProductRepository.class), mock(EventBus.class), new BusinessMetrics(new SimpleMeterRegistry()));
+                mock(ProductRepository.class), mock(EventBus.class), new BusinessMetrics(new SimpleMeterRegistry()),
+                mock(NodeContext.class));
         ResponseEntity<?> res = c.list(null, null, employee("s1"));
         assertForbidden(res);
     }
@@ -53,7 +56,8 @@ class CrossStoreReadGuardTest {
     @Test
     void productList_employeeRequestingOtherStore_returns403() {
         ProductController c = new ProductController(
-                mock(ProductRepository.class), mock(EventBus.class), new BusinessMetrics(new SimpleMeterRegistry()));
+                mock(ProductRepository.class), mock(EventBus.class), new BusinessMetrics(new SimpleMeterRegistry()),
+                mock(NodeContext.class));
         ResponseEntity<?> res = c.list("s2", null, employee("s1"));
         assertForbidden(res);
     }
@@ -62,7 +66,7 @@ class CrossStoreReadGuardTest {
     void productList_employeeOnOwnStore_returnsOk() {
         ProductRepository repo = mock(ProductRepository.class);
         when(repo.findByStoreId("s1")).thenReturn(List.of());
-        ProductController c = new ProductController(repo, mock(EventBus.class), new BusinessMetrics(new SimpleMeterRegistry()));
+        ProductController c = new ProductController(repo, mock(EventBus.class), new BusinessMetrics(new SimpleMeterRegistry()), mock(NodeContext.class));
         ResponseEntity<?> res = c.list("s1", null, employee("s1"));
         assertThat(res.getStatusCode()).isEqualTo(HttpStatus.OK);
     }
@@ -71,7 +75,7 @@ class CrossStoreReadGuardTest {
     void productList_adminWithoutStoreId_returnsAllProducts() {
         ProductRepository repo = mock(ProductRepository.class);
         when(repo.findAll()).thenReturn(List.of());
-        ProductController c = new ProductController(repo, mock(EventBus.class), new BusinessMetrics(new SimpleMeterRegistry()));
+        ProductController c = new ProductController(repo, mock(EventBus.class), new BusinessMetrics(new SimpleMeterRegistry()), mock(NodeContext.class));
         ResponseEntity<?> res = c.list(null, null, admin());
         assertThat(res.getStatusCode()).isEqualTo(HttpStatus.OK);
     }
@@ -82,7 +86,7 @@ class CrossStoreReadGuardTest {
     void productList_returnsEtagHeader() {
         ProductRepository repo = mock(ProductRepository.class);
         when(repo.findAll()).thenReturn(List.of(productFixture("p-1", 0), productFixture("p-2", 0)));
-        ProductController c = new ProductController(repo, mock(EventBus.class), new BusinessMetrics(new SimpleMeterRegistry()));
+        ProductController c = new ProductController(repo, mock(EventBus.class), new BusinessMetrics(new SimpleMeterRegistry()), mock(NodeContext.class));
         ResponseEntity<?> res = c.list(null, null, admin());
         assertThat(res.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(res.getHeaders().getETag()).isNotBlank().startsWith("W/\"");
@@ -92,7 +96,7 @@ class CrossStoreReadGuardTest {
     void productList_with_ifNoneMatch_matching_returns304WithEmptyBody() {
         ProductRepository repo = mock(ProductRepository.class);
         when(repo.findAll()).thenReturn(List.of(productFixture("p-1", 7), productFixture("p-2", 3)));
-        ProductController c = new ProductController(repo, mock(EventBus.class), new BusinessMetrics(new SimpleMeterRegistry()));
+        ProductController c = new ProductController(repo, mock(EventBus.class), new BusinessMetrics(new SimpleMeterRegistry()), mock(NodeContext.class));
         // 1er appel récupère l'ETag
         String etag = c.list(null, null, admin()).getHeaders().getETag();
         // 2e appel le repasse → 304 sans body, ETag rééémis (RFC 7232 §4.1)
@@ -106,7 +110,7 @@ class CrossStoreReadGuardTest {
     void productList_with_ifNoneMatch_stale_returns200WithBody() {
         ProductRepository repo = mock(ProductRepository.class);
         when(repo.findAll()).thenReturn(List.of(productFixture("p-1", 0)));
-        ProductController c = new ProductController(repo, mock(EventBus.class), new BusinessMetrics(new SimpleMeterRegistry()));
+        ProductController c = new ProductController(repo, mock(EventBus.class), new BusinessMetrics(new SimpleMeterRegistry()), mock(NodeContext.class));
         ResponseEntity<?> res = c.list(null, "W/\"obsolete-etag\"", admin());
         assertThat(res.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(res.getBody()).isNotNull();
@@ -115,7 +119,7 @@ class CrossStoreReadGuardTest {
     @Test
     void productList_etag_changesWhenVersionChanges() {
         ProductRepository repo = mock(ProductRepository.class);
-        ProductController c = new ProductController(repo, mock(EventBus.class), new BusinessMetrics(new SimpleMeterRegistry()));
+        ProductController c = new ProductController(repo, mock(EventBus.class), new BusinessMetrics(new SimpleMeterRegistry()), mock(NodeContext.class));
         // Snapshot 1 : version 0
         when(repo.findAll()).thenReturn(List.of(productFixture("p-1", 0)));
         String etag1 = c.list(null, null, admin()).getHeaders().getETag();
@@ -140,7 +144,8 @@ class CrossStoreReadGuardTest {
     void stockMovements_employeeWithoutStoreId_returns403() {
         StockController c = new StockController(
                 mock(ProductRepository.class), mock(StockMovementRepository.class),
-                mock(EventBus.class), new BusinessMetrics(new SimpleMeterRegistry()));
+                mock(EventBus.class), new BusinessMetrics(new SimpleMeterRegistry()),
+                mock(OperationLogService.class), mock(NodeContext.class));
         ResponseEntity<?> res = c.movements(null, employee("s1"));
         assertForbidden(res);
     }
@@ -149,7 +154,8 @@ class CrossStoreReadGuardTest {
     void stockMovements_employeeRequestingOtherStore_returns403() {
         StockController c = new StockController(
                 mock(ProductRepository.class), mock(StockMovementRepository.class),
-                mock(EventBus.class), new BusinessMetrics(new SimpleMeterRegistry()));
+                mock(EventBus.class), new BusinessMetrics(new SimpleMeterRegistry()),
+                mock(OperationLogService.class), mock(NodeContext.class));
         ResponseEntity<?> res = c.movements("s2", employee("s1"));
         assertForbidden(res);
     }
@@ -159,7 +165,8 @@ class CrossStoreReadGuardTest {
         StockMovementRepository moves = mock(StockMovementRepository.class);
         when(moves.findAllByOrderByDateDesc()).thenReturn(List.of());
         StockController c = new StockController(
-                mock(ProductRepository.class), moves, mock(EventBus.class), new BusinessMetrics(new SimpleMeterRegistry()));
+                mock(ProductRepository.class), moves, mock(EventBus.class), new BusinessMetrics(new SimpleMeterRegistry()),
+                mock(OperationLogService.class), mock(NodeContext.class));
         ResponseEntity<?> res = c.movements(null, admin());
         assertThat(res.getStatusCode()).isEqualTo(HttpStatus.OK);
     }
@@ -190,6 +197,8 @@ class CrossStoreReadGuardTest {
                 repo, mock(ProductRepository.class), mock(CustomerRepository.class),
                 mock(SettingsRepository.class), mock(StockMovementRepository.class),
                 mock(EventBus.class), new BusinessMetrics(new SimpleMeterRegistry()),
+                mock(OperationLogService.class),
+                mock(NodeContext.class),
                 mock(PlatformTransactionManager.class));
         Object res = c.list("s1", null, 50, employee("s1"));
         // Sur le path heureux, le repo retourne directement la List<Sale> (pas un ResponseEntity)
@@ -204,6 +213,8 @@ class CrossStoreReadGuardTest {
                 mock(CustomerRepository.class), mock(SettingsRepository.class),
                 mock(StockMovementRepository.class), mock(EventBus.class),
                 new BusinessMetrics(new SimpleMeterRegistry()),
+                mock(OperationLogService.class),
+                mock(NodeContext.class),
                 mock(PlatformTransactionManager.class));
     }
 

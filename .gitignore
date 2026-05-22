@@ -3,6 +3,8 @@
 data/
 dist
 dist/
+dist-central/
+dist-store/
 dist-ssr
 .DS_Store
 # Editor directories and files

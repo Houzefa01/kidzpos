@@ -9,6 +9,7 @@ import com.kidzpos.repo.ProductRepository;
 import com.kidzpos.repo.StockMovementRepository;
 import com.kidzpos.security.JwtAuthFilter.AuthPrincipal;
 import com.kidzpos.security.StoreAccessGuard;
+import com.kidzpos.sync.OperationLogService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import jakarta.validation.Valid;
@@ -31,10 +32,16 @@ public class StockController {
     private final StockMovementRepository moves;
     private final EventBus bus;
     private final BusinessMetrics metrics;
+    private final OperationLogService opLog;
+    private final com.kidzpos.sync.NodeContext nodeContext;
 
     public StockController(ProductRepository products, StockMovementRepository moves,
-                           EventBus bus, BusinessMetrics metrics) {
+                           EventBus bus, BusinessMetrics metrics,
+                           OperationLogService opLog,
+                           com.kidzpos.sync.NodeContext nodeContext) {
         this.products = products; this.moves = moves; this.bus = bus; this.metrics = metrics;
+        this.opLog = opLog;
+        this.nodeContext = nodeContext;
     }
 
     /**
@@ -47,7 +54,9 @@ public class StockController {
                                        @AuthenticationPrincipal AuthPrincipal me) {
         var deny = StoreAccessGuard.denyIfCrossStore(me, storeId);
         if (deny != null) return deny;
-        var list = storeId == null ? moves.findAllByOrderByDateDesc() : moves.findByStoreIdOrderByDateDesc(storeId);
+        // V19-audit — sur nœud store-scoped, force le scope (anti-fuite ADMIN).
+        String scope = StoreAccessGuard.enforceStoreScope(storeId, me, nodeContext);
+        var list = scope == null ? moves.findAllByOrderByDateDesc() : moves.findByStoreIdOrderByDateDesc(scope);
         return ResponseEntity.ok(list);
     }
 
@@ -77,6 +86,14 @@ public class StockController {
                 .userId(me.id()).reason(r.reason())
                 .clientMovementId(blankToNull(r.clientMovementId()))
                 .build());
+        // ETAPE 3 — journal d'opérations (best-effort).
+        opLog.record("stock.adjust", Map.of(
+                "productId", p.getId(),
+                "storeId", p.getStoreId(),
+                "delta", r.delta(),
+                "reason", r.reason(),
+                "newStock", p.getStock(),
+                "clientMovementId", r.clientMovementId()));
         bus.publish("product", "updated", p);
         bus.publish("stock", "moved", Map.of("productId", p.getId()));
         return ResponseEntity.ok(p);
@@ -93,6 +110,13 @@ public class StockController {
         }
         var src = products.findById(r.productId()).orElse(null);
         if (src == null) return ResponseEntity.notFound().build();
+        // V19-audit — Sur un nœud store-scoped, le produit source DOIT appartenir
+        // au store de ce nœud. Même un ADMIN ne peut pas transférer un produit
+        // qu'il ne possède pas. 404 (pas 403) pour ne pas révéler l'existence.
+        // Le target store reste libre (volontairement, c'est le but du transfer).
+        if (!StoreAccessGuard.isInScope(src.getStoreId(), me, nodeContext)) {
+            return ResponseEntity.notFound().build();
+        }
         if (src.getStock() < r.quantity()) return ResponseEntity.badRequest().body(Map.of("error", "Stock insuffisant"));
 
         var target = products.findByStoreIdAndSkuIgnoreCase(r.targetStoreId(), src.getSku()).orElseGet(() -> {
@@ -123,6 +147,14 @@ public class StockController {
                 .date(Instant.now()).userId(me.id())
                 .targetStoreId(src.getStoreId()).build());
 
+        // ETAPE 3 — journal d'opérations (best-effort).
+        opLog.record("stock.transfer", Map.of(
+                "sourceProductId", src.getId(),
+                "sourceStoreId", src.getStoreId(),
+                "targetProductId", target.getId(),
+                "targetStoreId", target.getStoreId(),
+                "quantity", r.quantity(),
+                "clientMovementId", r.clientMovementId()));
         bus.publish("product", "bulkUpdated", null);
         bus.publish("stock", "transferred", Map.of("from", src.getId(), "to", target.getId()));
         return ResponseEntity.ok(Map.of("source", src, "target", target));

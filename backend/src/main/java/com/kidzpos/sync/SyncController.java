@@ -4,6 +4,7 @@ import com.kidzpos.domain.OperationLog;
 import com.kidzpos.domain.SyncInbox;
 import com.kidzpos.repo.OperationLogRepository;
 import com.kidzpos.repo.SyncInboxRepository;
+import com.kidzpos.sync.SyncApiKeyFilter.SyncPrincipal;
 import com.kidzpos.sync.SyncDtos.PullResponse;
 import com.kidzpos.sync.SyncDtos.PushOperation;
 import com.kidzpos.sync.SyncDtos.PushRequest;
@@ -14,12 +15,14 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -71,10 +74,31 @@ public class SyncController {
      */
     @PostMapping("/push")
     @Transactional
-    public ResponseEntity<PushResponse> push(@Valid @RequestBody PushRequest req) {
+    public ResponseEntity<?> push(@Valid @RequestBody PushRequest req,
+                                  @AuthenticationPrincipal Object principal) {
         if (req == null || req.operations() == null || req.operations().isEmpty()) {
             log.info("[sync] push received but empty (node={})", req == null ? "?" : req.nodeId());
             return ResponseEntity.ok(new PushResponse(0, 0, 0, List.of(), List.of()));
+        }
+
+        // V21 — Cross-validation : si l'appelant est authentifié par une clé per-store,
+        // il NE PEUT pousser QUE des opérations de SON store. Empêche un store
+        // compromis de pousser des operations forgées au nom d'un autre store.
+        // - Mode JWT ADMIN : pas de SyncPrincipal → bypass (admin omnipotent).
+        // - Mode legacy (clé partagée) : SyncPrincipal.perStore=false → bypass.
+        // - Mode per-store : enforce strict.
+        if (principal instanceof SyncPrincipal sp && sp.perStore() && sp.storeId() != null) {
+            for (PushOperation op : req.operations()) {
+                if (op.storeId() != null && !sp.storeId().equals(op.storeId())) {
+                    log.warn("[sync] cross-store push rejected: authenticated store={} pushed op for store={}",
+                            sp.storeId(), op.storeId());
+                    return ResponseEntity.status(403).body(Map.of(
+                            "error", "cross-store push forbidden",
+                            "authenticatedStoreId", sp.storeId(),
+                            "rejectedStoreId", op.storeId()
+                    ));
+                }
+            }
         }
 
         int received = req.operations().size();

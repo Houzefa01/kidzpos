@@ -56,6 +56,7 @@ public class SyncPushService {
 
     private final OperationLogRepository repo;
     private final ObjectMapper mapper;
+    private final NodeContext nodeContext;
     private final String centralUrl;
     private final String apiKey;
     private final String nodeId;
@@ -68,6 +69,7 @@ public class SyncPushService {
 
     public SyncPushService(OperationLogRepository repo,
                            ObjectMapper mapper,
+                           NodeContext nodeContext,
                            @Value("${kidzpos.sync.push.central-url:}") String centralUrl,
                            @Value("${kidzpos.sync.push.api-key:}") String apiKey,
                            @Value("${kidzpos.node.id:local-default}") String nodeId,
@@ -78,6 +80,7 @@ public class SyncPushService {
                            @Value("${kidzpos.sync.push.retry.max-attempts:0}") int maxAttempts) {
         this.repo = repo;
         this.mapper = mapper;
+        this.nodeContext = nodeContext;
         this.centralUrl = centralUrl == null ? "" : centralUrl.replaceAll("/+$", "");
         this.apiKey = apiKey == null ? "" : apiKey;
         this.nodeId = nodeId;
@@ -161,11 +164,19 @@ public class SyncPushService {
             return 0;
         }
 
-        HttpRequest req = HttpRequest.newBuilder()
+        // V21 — Si le nœud est store-scoped, ajout du header X-Sync-Store-Id.
+        // Le central l'utilise pour cross-valider (le push n'est accepté que
+        // si toutes les ops appartiennent à ce store). Backward compat : si le
+        // central est en mode legacy (clé partagée), le header est ignoré.
+        HttpRequest.Builder builder = HttpRequest.newBuilder()
                 .uri(URI.create(centralUrl + "/api/sync/push"))
                 .timeout(timeout)
                 .header("Content-Type", "application/json")
-                .header("X-Sync-Api-Key", apiKey)
+                .header("X-Sync-Api-Key", apiKey);
+        if (nodeContext.isStoreScoped()) {
+            builder.header("X-Sync-Store-Id", nodeContext.storeId());
+        }
+        HttpRequest req = builder
                 .POST(HttpRequest.BodyPublishers.ofString(body))
                 .build();
 

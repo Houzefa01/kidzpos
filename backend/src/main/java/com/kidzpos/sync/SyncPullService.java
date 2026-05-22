@@ -110,13 +110,16 @@ public class SyncPullService {
             url.append("&since=").append(URLEncoder.encode(since.toString(), StandardCharsets.UTF_8));
         }
 
-        HttpRequest req = HttpRequest.newBuilder()
+        // V21 — Header X-Sync-Store-Id si nœud store-scoped (cf SyncPushService).
+        HttpRequest.Builder builder = HttpRequest.newBuilder()
                 .uri(URI.create(url.toString()))
                 .timeout(timeout)
                 .header("X-Sync-Api-Key", apiKey)
-                .header("Accept", "application/json")
-                .GET()
-                .build();
+                .header("Accept", "application/json");
+        if (nodeContext.isStoreScoped()) {
+            builder.header("X-Sync-Store-Id", nodeContext.storeId());
+        }
+        HttpRequest req = builder.GET().build();
 
         HttpResponse<String> res;
         try {

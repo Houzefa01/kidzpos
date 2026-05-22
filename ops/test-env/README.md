@@ -176,6 +176,63 @@ export KIDZPOS_SYNC_INBOX_INTERVAL_MS=10000
 | `KIDZPOS_SYNC_INBOUND_API_KEY` (central) | `test-sync-key-shared-123456789` |
 | Admin password (les deux) | `admin123` |
 
+## V21 — Migration vers clés API par store (optionnel pour les tests)
+
+Le mode legacy (clé partagée ci-dessus) reste accepté tant qu'aucune clé
+per-store n'existe en base. Pour tester le mode V21 :
+
+```bash
+# 1) Login admin sur le central
+TOKEN=$(curl -s -X POST http://localhost:8080/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"admin@kidzpos.com","password":"admin123"}' \
+  | jq -r .token)
+
+# 2) Créer une clé pour le store s1 — COPIER le plaintext, il n'apparaîtra plus
+curl -s -X POST http://localhost:8080/api/sync/keys \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"storeId":"s1","label":"store s1 test-env"}' | jq
+
+# Response :
+# {
+#   "id": "…",
+#   "storeId": "s1",
+#   "label": "store s1 test-env",
+#   "createdAt": "…",
+#   "plaintext": "abc…xyz"   ← copier IMMÉDIATEMENT
+# }
+
+# 3) Redémarrer le store avec la nouvelle clé
+./ops/test-env/stop-all.sh
+KIDZPOS_SYNC_API_KEY="abc…xyz" ./ops/test-env/start-store.sh
+
+# 4) Vérifier que le push remonte (le central va exiger X-Sync-Store-Id) :
+tail -f logs/central.log | grep '\[sync\]'
+
+# Listing des clés actives (sans révéler le hash)
+curl -s -H "Authorization: Bearer $TOKEN" \
+  http://localhost:8080/api/sync/keys | jq
+
+# Révoquer une clé
+curl -s -X DELETE -H "Authorization: Bearer $TOKEN" \
+  http://localhost:8080/api/sync/keys/<id> | jq
+```
+
+Côté central, dès qu'une clé existe en DB, **le mode legacy est désactivé** :
+tout push sans `X-Sync-Store-Id` valide est rejeté avec un log warn. Tester
+qu'un store compromis ne peut PAS forger un push pour un autre store :
+
+```bash
+# Avec la clé de s1, essayer de push pour s2 → 403 attendu
+curl -X POST http://localhost:8080/api/sync/push \
+  -H "X-Sync-Api-Key: <key-de-s1>" \
+  -H "X-Sync-Store-Id: s1" \
+  -H 'Content-Type: application/json' \
+  -d '{"nodeId":"forge","operations":[{"id":"00000000-0000-0000-0000-000000000001","type":"product.created","payload":"{}","createdAt":"2026-01-01T00:00:00Z","storeId":"s2"}]}'
+# → {"error":"cross-store push forbidden","authenticatedStoreId":"s1","rejectedStoreId":"s2"}
+```
+
 ---
 
 ## Architecture du test

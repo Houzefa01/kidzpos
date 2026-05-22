@@ -50,4 +50,14 @@ public interface OperationLogRepository extends JpaRepository<OperationLog, UUID
 
     /** Pour {@code /api/debug/status} et dashboard ops. */
     long countBySyncedFalse();
+
+    /**
+     * Plus ancien event en attente de sync. Utilisé par le gauge
+     * {@code kidzpos.sync.lag_seconds} (cf BusinessMetrics) :
+     *   lag = now() - oldestUnsynced.createdAt
+     *
+     * Retourne {@link java.util.Optional#empty()} si tout est syncé.
+     * Spring Data dérive le SELECT avec ORDER BY + LIMIT 1.
+     */
+    java.util.Optional<OperationLog> findFirstBySyncedFalseOrderByCreatedAtAsc();
 }

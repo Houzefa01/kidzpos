@@ -161,6 +161,38 @@ groups:
 
   - name: kidzpos.sync
     rules:
+      # Lag de sync côté store : âge du plus vieux operation_log avec synced=false.
+      # 0 en régime nominal. Au-delà de 5 min, le central est probablement
+      # injoignable ou a un problème — les ventes ne remontent plus vers
+      # l'agrégateur. Toujours mesuré côté magasin (le central, lui, reste à 0).
+      - alert: SyncLagHigh
+        expr: kidzpos_sync_lag_seconds > 300
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Sync lag > 5 min sur {{ $labels.instance }}"
+          description: |
+            Le plus vieux event de operation_log non syncé date de plus de 5 min.
+            Le push vers le central n'aboutit pas. Causes typiques :
+              - central injoignable (firewall, DNS, panne réseau)
+              - X-Sync-Api-Key invalide ou expiré
+              - central retourne 5xx persistant
+            Vérifier les logs [sync-push] côté store + dashboard SyncBackend.
+
+      - alert: SyncLagCritical
+        expr: kidzpos_sync_lag_seconds > 1800
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Sync lag CRITIQUE > 30 min sur {{ $labels.instance }}"
+          description: |
+            Plus de 30 min de retard de sync : risque réel de perte de ventes
+            en cas de panne du store (DB locale = source de vérité unique).
+            Intervention immédiate requise.
+          runbook_url: "file:///ops/runbooks/sync_lag_critical.md"
+
       # Ratio d'erreurs anormalement haut sur le inbox processor : signal qu'un
       # handler ou un type d'event diverge (schema drift, payload invalide,
       # bug applicatif côté magasin émetteur). On compare errored vs total traité

@@ -41,3 +41,16 @@ kidzpos:
       enabled: false
     inbound:
       api-key: ${KIDZPOS_SYNC_INBOUND_API_KEY:}
+    # Purge périodique d'operation_log côté central — évite la croissance
+    # illimitée (1 ligne par mutation × N stores). Garde 90 jours par défaut,
+    # configurable. Le job n'est instancié QUE si enabled=true (cf
+    # @ConditionalOnProperty sur OperationLogCleanupJob).
+    #
+    # IMPORTANT : ne supprime que les events synced=true. Les events en attente
+    # de sync sont préservés indépendamment de leur âge (audit + idempotence).
+    cleanup:
+      enabled: ${KIDZPOS_SYNC_CLEANUP_ENABLED:true}
+      retention-days: ${KIDZPOS_SYNC_CLEANUP_RETENTION_DAYS:90}
+      batch-size: ${KIDZPOS_SYNC_CLEANUP_BATCH_SIZE:1000}
+      interval-ms: ${KIDZPOS_SYNC_CLEANUP_INTERVAL_MS:3600000}
+      initial-delay-ms: ${KIDZPOS_SYNC_CLEANUP_INITIAL_DELAY_MS:600000}

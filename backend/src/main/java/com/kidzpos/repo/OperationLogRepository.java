@@ -3,6 +3,9 @@ package com.kidzpos.repo;
 import com.kidzpos.domain.OperationLog;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import java.time.Instant;
 import java.util.List;
@@ -60,4 +63,31 @@ public interface OperationLogRepository extends JpaRepository<OperationLog, UUID
      * Spring Data dérive le SELECT avec ORDER BY + LIMIT 1.
      */
     java.util.Optional<OperationLog> findFirstBySyncedFalseOrderByCreatedAtAsc();
+
+    /**
+     * Purge bornée : supprime au plus {@code limit} lignes anciennes ET syncées.
+     *
+     * Sécurité :
+     *   - synced=true UNIQUEMENT → on ne supprime jamais d'event en attente
+     *   - created_at < cutoff → respect du TTL configuré
+     *   - LIMIT en sous-requête → borne la taille de la TX (anti-LongRunningTX)
+     *
+     * Native query : Spring Data JPA ne supporte pas DELETE … LIMIT en JPQL.
+     * IN (SELECT … LIMIT) garde le DELETE déterministe sur n'importe quel SGBD,
+     * et l'optimizer Postgres collapse en seek index efficace.
+     */
+    @Modifying
+    @Query(value = """
+            DELETE FROM operation_log
+            WHERE id IN (
+                SELECT id FROM operation_log
+                WHERE synced = true AND created_at < :cutoff
+                ORDER BY created_at ASC
+                LIMIT :limit
+            )
+            """, nativeQuery = true)
+    int deleteSyncedOlderThan(@Param("cutoff") Instant cutoff, @Param("limit") int limit);
+
+    /** Compteur exploité par le job de purge pour log "il restait N lignes éligibles". */
+    long countBySyncedTrueAndCreatedAtLessThan(Instant cutoff);
 }

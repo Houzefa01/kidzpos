@@ -87,7 +87,11 @@ public class SyncApiKeyFilter extends OncePerRequestFilter {
             SecurityContextHolder.getContext().setAuthentication(auth);
             log.debug("[sync] API-KEY accepted for {}", path);
         } else if (provided != null) {
-            log.warn("[sync] API-KEY mismatch on {} (header present, value rejected)", path);
+            // IP source incluse pour forensics — un mismatch répété depuis la même IP
+            // signale une tentative d'enum (clé devinée). Tomcat lit X-Forwarded-For
+            // via server.forward-headers-strategy=native → IP cliente réelle.
+            log.warn("[sync] API-KEY mismatch on {} from {} (header present, value rejected)",
+                    path, req.getRemoteAddr());
             // Pas de short-circuit : on laisse Spring Security rendre le 401/403 propre
             // (cohérent avec le reste des refus auth).
         }

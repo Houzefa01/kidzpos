@@ -53,6 +53,11 @@ public class SyncPullService {
     private final Duration timeout;
     private final HttpClient http;
 
+    /** Compteur d'échecs consécutifs (réseau / timeout / 5xx). Reset sur 2xx. */
+    private int consecutiveFailures = 0;
+    /** Seuil au-delà duquel on passe d'INFO à WARN — signal "central durablement KO". */
+    private static final int FAILURE_WARN_THRESHOLD = 5;
+
     public SyncPullService(SyncInboxRepository inbox,
                            ObjectMapper mapper,
                            NodeContext nodeContext,
@@ -117,20 +122,19 @@ public class SyncPullService {
         try {
             res = http.send(req, HttpResponse.BodyHandlers.ofString());
         } catch (java.net.http.HttpConnectTimeoutException e) {
-            log.info("[sync-pull] central unreachable (connect timeout) — will retry");
+            noteFailure("connect timeout");
             return 0;
         } catch (java.net.http.HttpTimeoutException e) {
-            log.info("[sync-pull] central timeout — will retry");
+            noteFailure("read timeout");
             return 0;
         } catch (java.io.IOException | InterruptedException e) {
             if (e instanceof InterruptedException) Thread.currentThread().interrupt();
-            log.info("[sync-pull] network error: {} — will retry", e.getMessage());
+            noteFailure("network error: " + e.getMessage());
             return 0;
         }
 
         if (res.statusCode() / 100 != 2) {
-            log.warn("[sync-pull] central returned HTTP {} — body={} — will retry",
-                    res.statusCode(), abbreviate(res.body()));
+            noteFailure("HTTP " + res.statusCode() + " body=" + abbreviate(res.body()));
             return 0;
         }
 
@@ -138,9 +142,12 @@ public class SyncPullService {
         try {
             parsed = mapper.readValue(res.body(), PullResponse.class);
         } catch (Exception e) {
-            log.warn("[sync-pull] central response unparseable: {} — will retry", e.getMessage());
+            noteFailure("response unparseable: " + e.getMessage());
             return 0;
         }
+
+        // Réponse 2xx + parsable → central healthy, on reset le compteur.
+        noteSuccess();
 
         if (parsed.operations() == null || parsed.operations().isEmpty()) {
             log.debug("[sync-pull] no new events (since={})", since);
@@ -202,5 +209,33 @@ public class SyncPullService {
     private static String abbreviate(String s) {
         if (s == null) return "";
         return s.length() > 200 ? s.substring(0, 200) + "…" : s;
+    }
+
+    /**
+     * Compte un échec consécutif et choisit le niveau de log :
+     *   - n ≤ THRESHOLD → INFO (bruit acceptable, central juste down momentanément)
+     *   - n > THRESHOLD → WARN (central durablement injoignable → ops doit regarder)
+     *
+     * La cadence des retries n'est PAS modifiée (déjà pilotée par le scheduler à
+     * 60s prod / 10s test). Ce compteur ne fait QUE remonter le niveau d'urgence
+     * du log pour les alertes Loki/ELK.
+     */
+    private void noteFailure(String reason) {
+        consecutiveFailures++;
+        if (consecutiveFailures > FAILURE_WARN_THRESHOLD) {
+            log.warn("[sync-pull] central down for {} consecutive ticks: {}",
+                    consecutiveFailures, reason);
+        } else {
+            log.info("[sync-pull] failure {}/{}: {} — will retry",
+                    consecutiveFailures, FAILURE_WARN_THRESHOLD, reason);
+        }
+    }
+
+    /** Reset le compteur — central a répondu 2xx + payload parsable. */
+    private void noteSuccess() {
+        if (consecutiveFailures > FAILURE_WARN_THRESHOLD) {
+            log.info("[sync-pull] central recovered after {} consecutive failures", consecutiveFailures);
+        }
+        consecutiveFailures = 0;
     }
 }

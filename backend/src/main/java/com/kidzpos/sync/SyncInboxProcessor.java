@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kidzpos.domain.QuarantineEvent;
 import com.kidzpos.domain.SyncInbox;
 import com.kidzpos.events.EventBus;
+import com.kidzpos.observability.BusinessMetrics;
 import com.kidzpos.repo.QuarantineEventRepository;
 import com.kidzpos.repo.SyncInboxRepository;
 import org.slf4j.Logger;
@@ -61,6 +62,7 @@ public class SyncInboxProcessor {
     private final ObjectMapper mapper;
     private final NodeContext nodeContext;
     private final EventBus bus;
+    private final BusinessMetrics metrics;
     private final int batchSize;
     private final Map<String, InboxHandler> handlersByType;
     private final TransactionTemplate tx;
@@ -70,6 +72,7 @@ public class SyncInboxProcessor {
                               ObjectMapper mapper,
                               NodeContext nodeContext,
                               EventBus bus,
+                              BusinessMetrics metrics,
                               List<InboxHandler> handlers,
                               PlatformTransactionManager txm,
                               @Value("${kidzpos.sync.inbox.batch-size:50}") int batchSize) {
@@ -77,6 +80,7 @@ public class SyncInboxProcessor {
         this.quarantineRepo = quarantineRepo;
         this.mapper = mapper;
         this.bus = bus;
+        this.metrics = metrics;
         this.nodeContext = nodeContext;
         this.batchSize = Math.max(1, Math.min(batchSize, 500));
         this.handlersByType = new HashMap<>();
@@ -125,6 +129,7 @@ public class SyncInboxProcessor {
                 try {
                     quarantineOne(row, "max retries exceeded (count=" + row.getRetryCount() + ")");
                     quarantined++;
+                    metrics.incInboxQuarantined(row.getType());
                     log.error("[sync-inbox] quarantined id={} type={} reason=max-retries-exceeded count={}",
                             row.getId(), row.getType(), row.getRetryCount());
                 } catch (Exception e) {
@@ -143,6 +148,7 @@ public class SyncInboxProcessor {
                 try {
                     quarantineOne(row, "no handler for type " + row.getType());
                     quarantined++;
+                    metrics.incInboxQuarantined(row.getType());
                     log.warn("[sync-inbox] quarantined id={} type='{}' (no handler)",
                             row.getId(), row.getType());
                 } catch (Exception e) {
@@ -157,6 +163,7 @@ public class SyncInboxProcessor {
             try {
                 applyOne(row, handler);
                 applied++;
+                metrics.incInboxApplied(row.getType());
                 log.debug("[sync-inbox] applied id={} type={}", row.getId(), row.getType());
             } catch (Exception e) {
                 // Rollback déjà fait par tx.execute. Ligne reste processed=false.
@@ -173,6 +180,7 @@ public class SyncInboxProcessor {
                 log.error("[sync-inbox] error processing id={} type={} retry={}: {}",
                         row.getId(), row.getType(), newCount, e.getMessage());
                 errored++;
+                metrics.incInboxErrored(row.getType());
             }
         }
 

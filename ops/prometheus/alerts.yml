@@ -159,6 +159,54 @@ groups:
             Soit toutes les caisses sont éteintes (heure de fermeture), soit problème
             d'auth / réseau qui empêche /api/metrics/frontend. Vérifier business hours.
 
+  - name: kidzpos.sync
+    rules:
+      # Ratio d'erreurs anormalement haut sur le inbox processor : signal qu'un
+      # handler ou un type d'event diverge (schema drift, payload invalide,
+      # bug applicatif côté magasin émetteur). On compare errored vs total traité
+      # par type, sur fenêtre glissante 10 min, taux > 20%.
+      - alert: SyncInboxErrorRateHigh
+        expr: |
+          (
+            sum by (type) (rate(kidzpos_sync_inbox_errored_total[10m]))
+            /
+            (
+              sum by (type) (rate(kidzpos_sync_inbox_applied_total[10m]))
+              + sum by (type) (rate(kidzpos_sync_inbox_errored_total[10m]))
+              + 1e-9
+            )
+          ) > 0.2
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Sync inbox: >20% d'erreurs sur type={{ $labels.type }}"
+          description: |
+            Le handler '{{ $labels.type }}' échoue sur >20% des events depuis 10 min.
+            Cas typiques : payload corrompu côté émetteur, schema drift entre stores,
+            bug applicatif dans le handler. Inspecter sync_inbox WHERE type='{{ $labels.type }}'
+            AND processed=false ORDER BY retry_count DESC.
+
+      # Pic de quarantine : au-delà de MAX_RETRIES (5) ou no-handler, un event est
+      # déplacé vers quarantine_events. Plus de 3 quarantines par type en 10 min
+      # signale soit un type non whitelisté (nouveau handler à déployer), soit un
+      # event empoisonné qui ne sera jamais traité.
+      - alert: SyncInboxQuarantineSpike
+        expr: sum by (type) (increase(kidzpos_sync_inbox_quarantined_total[10m])) > 3
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Sync inbox: >3 quarantaines de type={{ $labels.type }} en 10 min"
+          description: |
+            Des events '{{ $labels.type }}' atteignent la quarantine_events.
+            Causes possibles :
+              - type non whitelisté (handler manquant côté store récepteur)
+              - dépasse MAX_RETRIES=5 (event poison à investiguer)
+            Action : SELECT * FROM quarantine_events WHERE event_type='{{ $labels.type }}'
+            ORDER BY created_at DESC LIMIT 10. Replay via POST /api/sync/quarantine/{id}/replay
+            après correction.
+
   - name: kidzpos.security
     rules:
       - alert: RefreshTokenReuse

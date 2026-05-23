@@ -32,7 +32,7 @@ groups:
           description: |
             postgres-exporter n'arrive plus à se connecter. Le backend est probablement
             en train de cascade-fail. Vérifier service postgres + disque + connexion réseau.
-          runbook_url: "file:///ops/runbooks/incident_backend_down.md"
+          runbook_url: "file:///ops/runbooks/db_down.md"
 
       - alert: PrometheusTargetMissing
         expr: up == 0
@@ -97,6 +97,7 @@ groups:
           description: |
             Le backend renvoie >5% d'erreurs serveur. Les caisses entrent en DEGRADED.
             Vérifier logs Spring + santé DB + ressources host.
+          runbook_url: "file:///ops/runbooks/high_5xx_or_latency.md"
 
       - alert: HighLatencyP95
         expr: |
@@ -111,6 +112,7 @@ groups:
           description: |
             Le backend ralentit. Si soutenu, déclenche DEGRADED côté caisses (rps=2, batch=1).
             Vérifier DB locks + GC pause + saturation CPU.
+          runbook_url: "file:///ops/runbooks/high_5xx_or_latency.md"
 
   - name: kidzpos.business
     rules:
@@ -147,6 +149,7 @@ groups:
           description: |
             Au moins une caisse n'arrive pas à sortir du mode dégradé. Backend instable
             ou réseau saturé. Vérifier corrélation avec HighBackend5xxRate.
+          runbook_url: "file:///ops/runbooks/high_5xx_or_latency.md"
 
       - alert: NoReportingCashier
         expr: kidzpos_frontend_reporting_cashiers == 0
@@ -179,6 +182,7 @@ groups:
               - X-Sync-Api-Key invalide ou expiré
               - central retourne 5xx persistant
             Vérifier les logs [sync-push] côté store + dashboard SyncBackend.
+          runbook_url: "file:///ops/runbooks/sync_lag_critical.md"
 
       - alert: SyncLagCritical
         expr: kidzpos_sync_lag_seconds > 1800
@@ -218,6 +222,7 @@ groups:
             Cas typiques : payload corrompu côté émetteur, schema drift entre stores,
             bug applicatif dans le handler. Inspecter sync_inbox WHERE type='{{ $labels.type }}'
             AND processed=false ORDER BY retry_count DESC.
+          runbook_url: "file:///ops/runbooks/sync_inbox_errors.md"
 
       # Pic de quarantine : au-delà de MAX_RETRIES (5) ou no-handler, un event est
       # déplacé vers quarantine_events. Plus de 3 quarantines par type en 10 min
@@ -238,6 +243,64 @@ groups:
             Action : SELECT * FROM quarantine_events WHERE event_type='{{ $labels.type }}'
             ORDER BY created_at DESC LIMIT 10. Replay via POST /api/sync/quarantine/{id}/replay
             après correction.
+          runbook_url: "file:///ops/runbooks/sync_inbox_errors.md"
+
+  - name: kidzpos.backup
+    rules:
+      # T8 — Off-site backup en retard (>36h). Le cron est quotidien 02h ;
+      # 36h tolère un loupé occasionnel. Si soutenu, risque réel de perte
+      # totale en cas de crash disque du store.
+      - alert: OffsiteBackupStale
+        expr: |
+          (time() - kidzpos_backup_offsite_last_success_timestamp_seconds) > 129600
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Backup off-site en retard de plus de 36h"
+          description: |
+            Le dernier offsite_sync.sh réussi date de > 36h. Si le store crashe,
+            perte de toutes les ventes depuis. Vérifier cron + connectivité NAS/S3.
+
+      # T8 — Off-site backup totalement absent (métrique jamais vue).
+      # Détecté via absent() : aucune série kidzpos_backup_offsite_*.
+      - alert: OffsiteBackupMissing
+        expr: absent(kidzpos_backup_offsite_last_success_timestamp_seconds)
+        for: 24h
+        labels:
+          severity: warning
+        annotations:
+          summary: "Aucune métrique de backup off-site depuis 24h"
+          description: |
+            Soit offsite_sync.sh n'est pas configuré (BACKUP_OFFSITE_KIND vide),
+            soit textfile collector node_exporter mal configuré. Configurer
+            BACKUP_OFFSITE_KIND/DEST puis cron, sinon données du store NON
+            répliquées hors machine.
+
+      # T9 — Test restore raté ou en retard (>10j). Le cron est hebdo dim 03h.
+      - alert: BackupRestoreTestStale
+        expr: |
+          (time() - kidzpos_backup_restore_test_last_success_timestamp_seconds) > 864000
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Test de restore raté ou absent depuis 10j"
+          description: |
+            Le dernier test_restore.sh réussi date de > 10j. Le backup peut être
+            illisible/incomplet sans qu'on le sache. Vérifier cron + logs récents.
+
+      - alert: BackupRestoreTestDrift
+        expr: kidzpos_backup_restore_test_drift_tables > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Restore drift: {{ $value }} table(s) divergent vs prod"
+          description: |
+            Une ou plusieurs tables ont un row count restore < prod -5%.
+            Soit le dump est trop ancien (RPO dépassé), soit corruption.
+            Investiguer logs test_restore.sh + relancer manuel.
 
   - name: kidzpos.security
     rules:
@@ -252,6 +315,7 @@ groups:
             Un cookie refresh déjà révoqué a été présenté. Tous les tokens de l'user
             ont été cascade-revoked. Vérifier logs `cascadedRevoke=N userId=...` et
             considérer un reset password.
+          runbook_url: "file:///ops/runbooks/refresh_failure.md"
 
       - alert: LoginRateLimited
         expr: increase(kidzpos_login_rate_limited_total[5m]) > 5
@@ -279,6 +343,7 @@ groups:
           description: |
             Beaucoup de tentatives de refresh sans cookie ou cookie invalide.
             Soit un client bugué soit une attaque. Inspecter les ip dans backend.log.
+          runbook_url: "file:///ops/runbooks/refresh_failure.md"
 
       - alert: OptimisticLockConflictSpike
         expr: increase(kidzpos_optimistic_lock_conflict_total[5m]) > 10
@@ -290,3 +355,4 @@ groups:
           description: |
             Plusieurs caisses éditent les mêmes produits simultanément. Possible
             problème de coordination ou comportement utilisateur inhabituel.
+          runbook_url: "file:///ops/runbooks/optimistic_lock_spike.md"

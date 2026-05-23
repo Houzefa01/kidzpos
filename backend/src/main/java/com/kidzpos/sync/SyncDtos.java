@@ -75,4 +75,25 @@ public class SyncDtos {
             List<PushOperation> operations,
             boolean hasMore
     ) {}
+
+    /**
+     * T15 — État de la sync exposé au frontend via GET /api/sync/status.
+     *
+     * <p>Consommé par OfflineBanner pour afficher "X ops en attente, Y s de
+     * retard" plutôt qu'un simple "online/offline". Permet à l'opérateur de
+     * savoir s'il peut éteindre la machine sans perdre de données.
+     *
+     * @param nodeRole       "central" | "local" | "standalone"
+     * @param nodeId         identifiant logique du nœud
+     * @param pendingCount   nombre d'events {@code operation_log.synced=false}
+     * @param oldestPending  timestamp du plus vieux event non syncé (null = rien)
+     * @param lagSeconds     age(oldestPending) en secondes (0 si rien)
+     */
+    public record SyncStatusResponse(
+            String nodeRole,
+            String nodeId,
+            long pendingCount,
+            Instant oldestPending,
+            long lagSeconds
+    ) {}
 }

@@ -1,13 +1,36 @@
 import { create } from "zustand";
-import { pingBackend } from "@/lib/apiClient";
+import { api, pingBackend, tokenStore } from "@/lib/apiClient";
 import { outbox } from "@/lib/outbox";
 import { startSse, stopSse, isSseOpen } from "@/lib/sse";
 import { syncService } from "@/lib/syncService";
+
+/**
+ * T15 — Snapshot de l'état du backend SYNC central pour cette caisse.
+ *
+ * Distinguer 2 niveaux :
+ *  • {@link BackendState.pendingCount}  : outbox LOCAL (caisse → backend store).
+ *  • {@link CentralSyncStatus.pending}  : operation_log LOCAL (backend store → central).
+ *
+ * Le second n'est visible qu'en lisant /api/sync/status (le backend store
+ * connaît son propre lag central). Permet à l'UI d'afficher "X ops vers le
+ * central — Y s de retard" plutôt qu'un simple "online".
+ */
+export interface CentralSyncStatus {
+  /** Type du nœud backend : "central" | "local" | "standalone". */
+  nodeRole: string;
+  /** Nombre d'events operation_log.synced=false côté backend store. */
+  pending: number;
+  /** Age (s) du plus vieux event non syncé. 0 = tout est à jour. */
+  lagSeconds: number;
+  /** Horodatage local du dernier fetch réussi. */
+  lastFetchAt: number;
+}
 
 interface BackendState {
   lanReachable: boolean;
   pendingCount: number;
   lastSync: number | null;
+  centralSync: CentralSyncStatus | null;
   setLan: (v: boolean) => void;
   refreshPending: () => void;
   pulse: () => Promise<void>;
@@ -17,6 +40,7 @@ export const useBackend = create<BackendState>((set, get) => ({
   lanReachable: false,
   pendingCount: outbox.size(),
   lastSync: null,
+  centralSync: null,
   setLan: (v) => set({ lanReachable: v }),
   refreshPending: () => set({ pendingCount: outbox.size() }),
   pulse: async () => {
@@ -42,6 +66,28 @@ export const useBackend = create<BackendState>((set, get) => ({
       if (sent > 0) set({ lastSync: Date.now() });
     }
     set({ pendingCount: outbox.size() });
+
+    // T15 — Rafraîchit l'état de la sync central (best-effort, silencieux).
+    // Skip si offline OU pas authentifié (pas de token = login screen).
+    if (ok && tokenStore.get()) {
+      try {
+        const s = await api<{
+          nodeRole: string; nodeId: string; pendingCount: number;
+          oldestPending: string | null; lagSeconds: number;
+        }>("/api/sync/status", { timeoutMs: 2000 });
+        set({
+          centralSync: {
+            nodeRole: s.nodeRole,
+            pending: s.pendingCount,
+            lagSeconds: s.lagSeconds,
+            lastFetchAt: Date.now(),
+          },
+        });
+      } catch {
+        // Best-effort : si /api/sync/status échoue (endpoint absent en mode
+        // standalone), on garde l'ancienne valeur. Le banner se débrouillera.
+      }
+    }
   },
 }));
 

@@ -6,6 +6,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
@@ -18,9 +19,15 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * P2.2 — Rate limit sur POST /api/auth/refresh.
  *
- * Fenêtre glissante 1 minute, 10 échecs (401) max par IP. Comme pour le filtre
- * login, seules les requêtes refusées consomment le quota — un client légitime
- * qui refresh toutes les 15 minutes ne le voit jamais.
+ * Fenêtre glissante configurable (défaut 1 minute / 10 échecs 401 par IP).
+ * Comme pour le filtre login, seules les requêtes refusées consomment le quota
+ * — un client légitime qui refresh toutes les 15 minutes ne le voit jamais.
+ *
+ * <p>T5 : calibrable via env :
+ * <pre>
+ *   KIDZPOS_RATELIMIT_REFRESH_LIMIT=20
+ *   KIDZPOS_RATELIMIT_REFRESH_WINDOW_MS=120000
+ * </pre>
  *
  * In-memory mono-instance : suffit pour un backend unique ; à porter sur Redis
  * si on passe à plusieurs instances (même remarque que LoginRateLimitFilter).
@@ -33,11 +40,19 @@ public class RefreshRateLimitFilter extends OncePerRequestFilter {
 
     private static final Logger log = LoggerFactory.getLogger(RefreshRateLimitFilter.class);
 
-    private static final int LIMIT = 10;
-    private static final long WINDOW_MS = 60_000L;
     private static final String PATH = "/api/auth/refresh";
 
+    private final int limit;
+    private final long windowMs;
+
     private final Map<String, Deque<Long>> attempts = new ConcurrentHashMap<>();
+
+    public RefreshRateLimitFilter(
+            @Value("${kidzpos.ratelimit.refresh.limit:10}") int limit,
+            @Value("${kidzpos.ratelimit.refresh.window-ms:60000}") long windowMs) {
+        this.limit = Math.max(1, limit);
+        this.windowMs = Math.max(1000L, windowMs);
+    }
 
     @Override
     protected void doFilterInternal(HttpServletRequest req, HttpServletResponse res, FilterChain chain)
@@ -53,11 +68,11 @@ public class RefreshRateLimitFilter extends OncePerRequestFilter {
         Deque<Long> q = attempts.computeIfAbsent(ip, k -> new ArrayDeque<>());
 
         synchronized (q) {
-            while (!q.isEmpty() && now - q.peekFirst() > WINDOW_MS) q.pollFirst();
+            while (!q.isEmpty() && now - q.peekFirst() > windowMs) q.pollFirst();
             if (q.isEmpty()) {
                 attempts.remove(ip, q);
-            } else if (q.size() >= LIMIT) {
-                long retryAfter = Math.max(1, (q.peekFirst() + WINDOW_MS - now) / 1000);
+            } else if (q.size() >= limit) {
+                long retryAfter = Math.max(1, (q.peekFirst() + windowMs - now) / 1000);
                 log.warn("Refresh rate-limit dépassé pour IP {} ({}s restantes)", ip, retryAfter);
                 res.setStatus(429);
                 res.setHeader("Retry-After", String.valueOf(retryAfter));

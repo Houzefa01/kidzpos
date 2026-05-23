@@ -72,22 +72,25 @@ public final class StoreAccessGuard {
     }
 
     /**
-     * V19-audit — Force le scope magasin sur les listings/aggregations.
+     * V19-audit / V22 — Force le scope magasin sur les listings/aggregations
+     * selon le rôle de l'appelant.
      *
-     * Sur un nœud store-scoped, retourne TOUJOURS {@code nodeContext.storeId()}
-     * (ignore ce que demande le client/admin → impossible de cross-store leak).
-     *
-     * Sur un nœud non-scoped (central ou legacy), retourne {@code requestedStoreId}
-     * (préserve le comportement legacy : ADMIN peut demander storeId=null pour
-     * "tous" et le central l'autorise pour agréger).
+     * <ul>
+     *   <li><b>ADMIN</b> : omnipotent — retourne {@code requestedStoreId} tel
+     *       quel (peut demander un store spécifique ou null pour "tous"). V22 :
+     *       un ADMIN doit pouvoir agréger / faire du support cross-store depuis
+     *       n'importe quel nœud.</li>
+     *   <li><b>EMPLOYEE avec storeId</b> : contraint à SON store (depuis le
+     *       JWT), pas au nœud. Un employé de s2 connecté sur un serveur s1
+     *       opère sur s2 grâce au full-mesh sync.</li>
+     *   <li><b>Sans auth / fallback</b> : contraint au {@code nodeContext} si
+     *       store-scoped (défense en profondeur quand l'auth manque).</li>
+     * </ul>
      *
      * Usage typique :
      *   String scope = StoreAccessGuard.enforceStoreScope(storeId, me, nodeContext);
      *   if (scope == null) return repo.findAll();
      *   return repo.findByStoreId(scope);
-     *
-     * Garantie : sur un local s1, un ADMIN qui passe ?storeId=s2 ou ?storeId=null
-     * sera SILENCIEUSEMENT contraint à s1. Aucune fuite cross-store possible.
      */
     public static String enforceStoreScope(String requestedStoreId, AuthPrincipal me, NodeContext nodeContext) {
         // V22 — ADMIN omnipotent (peut demander n'importe quel storeId ou null)

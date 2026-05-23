@@ -61,7 +61,12 @@ public class Dtos {
             String currency
     ) {}
 
-    public record RefundReq(@NotBlank String saleId) {}
+    /**
+     * V22 — {@code clientRefundId} : UUID stable côté client pour l'idempotence
+     * du refund au replay outbox. Optionnel : rétrocompat clients pré-V22.
+     * Fortement recommandé pour tout nouveau client.
+     */
+    public record RefundReq(@NotBlank String saleId, String clientRefundId) {}
 
     public record StockAdjustReq(
             @NotBlank String productId,

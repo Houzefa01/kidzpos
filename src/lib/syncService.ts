@@ -133,7 +133,22 @@ const defaultTransport: Transport = {
   isOnline: () => useBackend.getState().lanReachable,
 
   async send(spec) {
-    await api(spec.path, { method: spec.method, body: spec.body, timeoutMs: 8000 });
+    // T6 — Instrumentation P5 : enregistre la latence des envois directs (chemin
+    // online "happy path") en plus du replay outbox déjà instrumenté ligne ~216.
+    // Auparavant les samples étaient drainés par metricsReporter mais alimentés
+    // UNIQUEMENT depuis le replay — donc une caisse offline-rare sur LAN stable
+    // exportait toujours un tableau vide vers Prometheus. Le replayController
+    // adaptatif (P5) avait des décisions basées sur un signal manquant.
+    const start = Date.now();
+    try {
+      await api(spec.path, { method: spec.method, body: spec.body, timeoutMs: 8000 });
+      recordLatencySample(Date.now() - start);
+    } catch (err) {
+      // Sur erreur, on enregistre quand même la latence (utile pour mesurer les
+      // timeouts vs les 5xx rapides). Ne masque PAS l'exception.
+      recordLatencySample(Date.now() - start);
+      throw err;
+    }
   },
 
   enqueue(spec, _reason) {
@@ -280,7 +295,6 @@ const defaultTransport: Transport = {
       const transition = stateMachine.advance(metricsWindow.snapshot());
       if (transition.changed && transition.to === "DEGRADED") {
         // Mode dégradé : laisse une trace dans la console (pas de toast — UX).
-        // eslint-disable-next-line no-console
         console.warn("[syncService] Replay entered DEGRADED mode (backend instable)");
       }
 

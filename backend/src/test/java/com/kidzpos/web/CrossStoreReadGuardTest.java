@@ -192,16 +192,22 @@ class CrossStoreReadGuardTest {
     @Test
     void saleList_employeeOnOwnStore_doesNotReturnForbidden() {
         SaleRepository repo = mock(SaleRepository.class);
-        when(repo.findByStoreIdOrderByDateDesc("s1")).thenReturn(List.of());
+        // T3 — Le path "sans page" passe maintenant par la variante paginée (cap interne 2000).
+        org.springframework.data.domain.Page<com.kidzpos.domain.Sale> emptyPage =
+                org.springframework.data.domain.Page.empty();
+        when(repo.findByStoreIdOrderByDateDesc(org.mockito.ArgumentMatchers.eq("s1"),
+                org.mockito.ArgumentMatchers.any(org.springframework.data.domain.Pageable.class)))
+                .thenReturn(emptyPage);
         SaleController c = new SaleController(
                 repo, mock(ProductRepository.class), mock(CustomerRepository.class),
                 mock(SettingsRepository.class), mock(StockMovementRepository.class),
                 mock(EventBus.class), new BusinessMetrics(new SimpleMeterRegistry()),
                 mock(OperationLogService.class),
                 mock(NodeContext.class),
-                mock(PlatformTransactionManager.class));
+                mock(PlatformTransactionManager.class),
+                2000);
         Object res = c.list("s1", null, 50, employee("s1"));
-        // Sur le path heureux, le repo retourne directement la List<Sale> (pas un ResponseEntity)
+        // Sur le path heureux, le controller retourne List<Sale> (page.getContent()), pas un ResponseEntity.
         assertThat(res).isInstanceOf(List.class);
     }
 
@@ -215,7 +221,8 @@ class CrossStoreReadGuardTest {
                 new BusinessMetrics(new SimpleMeterRegistry()),
                 mock(OperationLogService.class),
                 mock(NodeContext.class),
-                mock(PlatformTransactionManager.class));
+                mock(PlatformTransactionManager.class),
+                2000);
     }
 
     @SuppressWarnings("unchecked")

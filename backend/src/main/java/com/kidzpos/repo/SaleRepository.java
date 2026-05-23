@@ -31,6 +31,10 @@ public interface SaleRepository extends JpaRepository<Sale, String> {
     /** I5 : détection rapide d'un refund existant pour bloquer le double-remboursement. */
     boolean existsByRefundedFrom(String saleId);
 
+    /** V22 — Idempotence du refund par clientRefundId (UUID stable côté client). */
+    @EntityGraph(attributePaths = "items")
+    Optional<Sale> findByClientRefundId(String clientRefundId);
+
     /** Pagination optionnelle (P0.5). Garde la même requête entityGraph items. */
     @EntityGraph(attributePaths = "items")
     Page<Sale> findByStoreIdOrderByDateDesc(String storeId, Pageable pageable);

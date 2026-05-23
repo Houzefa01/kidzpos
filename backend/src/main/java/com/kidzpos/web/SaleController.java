@@ -31,6 +31,16 @@ public class SaleController {
     /** Retry sur collision uk_sale_store_seq (concurrence checkout/refund parallèle). */
     private static final int SEQ_RETRY_MAX = 5;
 
+    /**
+     * Audit-2026-05 — Cap dur sur les listings non paginés. Protège contre la
+     * bombe à retardement : sans cap, un store avec 100k+ ventes serait livré
+     * en une seule réponse (~100 Mo JSON, OOM frontend, GC backend).
+     * 2000 = ~6 mois de ventes pour un magasin moyen ; suffit largement pour
+     * l'historique consulté en POS ; au-delà, le client DOIT paginer.
+     * Override via {@code KIDZPOS_SALES_LIST_DEFAULT_CAP} (env) en cas de besoin.
+     */
+    private final int unpaginatedListCap;
+
     private final SaleRepository sales;
     private final ProductRepository products;
     private final CustomerRepository customers;
@@ -48,23 +58,35 @@ public class SaleController {
                           BusinessMetrics metrics,
                           OperationLogService opLog,
                           NodeContext nodeContext,
-                          PlatformTransactionManager txm) {
+                          PlatformTransactionManager txm,
+                          @org.springframework.beans.factory.annotation.Value("${kidzpos.sales.list-default-cap:2000}") int unpaginatedListCap) {
         this.sales = sales; this.products = products;
         this.customers = customers; this.settingsRepo = settingsRepo;
         this.moves = moves; this.bus = bus; this.metrics = metrics;
         this.opLog = opLog;
         this.nodeContext = nodeContext;
         this.tx = new TransactionTemplate(txm);
+        this.unpaginatedListCap = Math.max(50, unpaginatedListCap);
     }
 
     /**
-     * Listing des ventes. Rétrocompat : si `page` non fourni → renvoie TOUTES les ventes
-     * (comportement historique, consommé par syncBackend). Sinon → Spring Page<Sale> avec
-     * tri date DESC déjà appliqué côté repo. Le client paginé peut lire `content` + `totalElements`.
+     * Listing des ventes.
      *
-     * P4 — Politique GET cross-store STRICTE : un EMPLOYEE qui appelle sans `storeId`
-     * (= demande "tous les magasins") ou avec un storeId ≠ son magasin → 403.
-     * ADMIN passe partout. Pas de fallback silencieux : refus explicite.
+     * <p>Rétrocompat : si {@code page} non fourni → renvoie la List<Sale> historique,
+     * MAIS désormais capée à {@link #unpaginatedListCap} entrées (défaut 2000,
+     * configurable via {@code KIDZPOS_SALES_LIST_DEFAULT_CAP}). Au-delà, le client
+     * DOIT paginer explicitement.
+     *
+     * <p>Audit-2026-05 : avant ce cap, un store avec 100k+ ventes retournait ~100 Mo
+     * de JSON en une seule requête → OOM frontend + GC backend. Le cap est appliqué
+     * en triant par date DESC : on garde les ventes les plus récentes (= celles qui
+     * intéressent réellement le POS).
+     *
+     * <p>Avec {@code page} → Spring {@code Page<Sale>}, accès à toutes les ventes en
+     * navigation incrémentale ({@code content} + {@code totalElements}).
+     *
+     * <p>P4 — Politique GET cross-store STRICTE : un EMPLOYEE qui appelle sans
+     * {@code storeId} ou avec un storeId ≠ son magasin → 403. ADMIN passe partout.
      */
     @GetMapping
     public Object list(@RequestParam(required = false) String storeId,
@@ -78,9 +100,18 @@ public class SaleController {
         // le comportement legacy (storeId optionnel).
         String scope = StoreAccessGuard.enforceStoreScope(storeId, me, nodeContext);
         if (page == null) {
-            return scope == null
-                    ? sales.findAllByOrderByDateDesc()
-                    : sales.findByStoreIdOrderByDateDesc(scope);
+            // Cap dur : utilise la variante paginée pour ne charger que les N
+            // dernières ventes, puis on retourne juste le content (List<Sale>) →
+            // forme de réponse inchangée pour les clients legacy.
+            var capped = org.springframework.data.domain.PageRequest.of(0, unpaginatedListCap);
+            var pageRes = scope == null
+                    ? sales.findAllByOrderByDateDesc(capped)
+                    : sales.findByStoreIdOrderByDateDesc(scope, capped);
+            if (pageRes.getTotalElements() > unpaginatedListCap) {
+                log.warn("Sales list capped: store={} total={} returned={} (use ?page=N for full history)",
+                        scope, pageRes.getTotalElements(), unpaginatedListCap);
+            }
+            return pageRes.getContent();
         }
         var pageable = org.springframework.data.domain.PageRequest.of(Math.max(0, page), Math.min(500, Math.max(1, size)));
         return scope == null
@@ -246,6 +277,18 @@ public class SaleController {
     @PostMapping("/refund")
     public ResponseEntity<?> refund(@Valid @RequestBody RefundReq req, @AuthenticationPrincipal AuthPrincipal me) {
         if (!"ADMIN".equals(me.role())) return ResponseEntity.status(403).body(Map.of("error", "Admin requis"));
+        // V22 — Idempotence du refund. Si le client a déjà reçu une réponse pour
+        // ce clientRefundId (replay outbox, retry réseau), renvoyer le refund existant
+        // au lieu d'en créer un nouveau. Check en amont du retry-seq pour éviter
+        // toute contention DB en cas de boucle de retry serrée côté client.
+        if (req.clientRefundId() != null && !req.clientRefundId().isBlank()) {
+            var existing = sales.findByClientRefundId(req.clientRefundId());
+            if (existing.isPresent()) {
+                metrics.refundIdempotentReplay.increment();
+                log.info("Idempotent refund replay absorbed: clientRefundId={}", req.clientRefundId());
+                return ResponseEntity.ok(existing.get());
+            }
+        }
         return runWithSeqRetry(() -> tx.execute(status -> doRefund(req, me)));
     }
 
@@ -276,6 +319,14 @@ public class SaleController {
                 .pointsEarned(0).pointsRedeemed(0)
                 .paymentMode(orig.getPaymentMode())
                 .refundedFrom(orig.getId())
+                // V22 — Persisté pour bloquer tout futur replay du même clientRefundId.
+                // L'index UNIQUE partiel garantit aussi la sécurité en cas de race
+                // (deux requêtes concurrentes avec le même clientRefundId : une réussit,
+                // l'autre attrape DataIntegrityViolationException → 409).
+                .clientRefundId(
+                        req.clientRefundId() != null && !req.clientRefundId().isBlank()
+                                ? req.clientRefundId()
+                                : null)
                 .build();
 
         for (var i : orig.getItems()) {

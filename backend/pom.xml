@@ -20,7 +20,7 @@
     <properties>
         <java.version>17</java.version>
         <jjwt.version>0.12.6</jjwt.version>
-        <testcontainers.version>1.20.3</testcontainers.version>
+        <testcontainers.version>1.21.3</testcontainers.version>
         <springdoc.version>2.6.0</springdoc.version>
     </properties>
 
@@ -138,6 +138,23 @@
             <artifactId>spring-boot-testcontainers</artifactId>
             <scope>test</scope>
         </dependency>
+
+        <!-- Override docker-java to a recent version that negotiates the API
+             version dynamically. The version bundled with Testcontainers 1.21.x
+             (docker-java 3.4.2) hardcodes path prefix /v1.32/* which modern
+             Docker daemons (≥25.x, min API 1.40) reject with HTTP 400. -->
+        <dependency>
+            <groupId>com.github.docker-java</groupId>
+            <artifactId>docker-java-api</artifactId>
+            <version>3.5.1</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.github.docker-java</groupId>
+            <artifactId>docker-java-transport-zerodep</artifactId>
+            <version>3.5.1</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
@@ -152,6 +169,24 @@
                             <artifactId>lombok</artifactId>
                         </exclude>
                     </excludes>
+                </configuration>
+            </plugin>
+
+            <!-- Forward DOCKER_API_VERSION to the forked test JVM so docker-java
+                 negotiates a recent API version. Without this, docker-java falls
+                 back to its hardcoded default (v1.32) which modern Docker
+                 daemons (≥25.x, min API 1.40) reject with HTTP 400. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <environmentVariables>
+                        <DOCKER_API_VERSION>1.43</DOCKER_API_VERSION>
+                    </environmentVariables>
+                    <systemPropertyVariables>
+                        <DOCKER_API_VERSION>1.43</DOCKER_API_VERSION>
+                        <api.version>1.43</api.version>
+                    </systemPropertyVariables>
                 </configuration>
             </plugin>
         </plugins>

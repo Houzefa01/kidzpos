@@ -11,6 +11,7 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter;
 import com.kidzpos.sync.SyncApiKeyFilter;
+import com.kidzpos.sync.SyncRateLimitFilter;
 
 @Configuration
 public class SecurityConfig {
@@ -24,7 +25,8 @@ public class SecurityConfig {
     public SecurityFilterChain filterChain(HttpSecurity http, JwtAuthFilter jwtFilter,
                                            LoginRateLimitFilter loginRateLimitFilter,
                                            RefreshRateLimitFilter refreshRateLimitFilter,
-                                           SyncApiKeyFilter syncApiKeyFilter) throws Exception {
+                                           SyncApiKeyFilter syncApiKeyFilter,
+                                           SyncRateLimitFilter syncRateLimitFilter) throws Exception {
         http
             .csrf(c -> c.disable())
             .cors(c -> {})
@@ -88,6 +90,11 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.POST, "/api/stores/**").hasRole("ADMIN")
                 .requestMatchers(HttpMethod.PUT, "/api/stores/**").hasRole("ADMIN")
                 .requestMatchers(HttpMethod.DELETE, "/api/stores/**").hasRole("ADMIN")
+                // T15 — /api/sync/status retourne lag + pendingCount au frontend
+                // (OfflineBanner badge). Lecture seule, aucun risque, doit être
+                // accessible à toute caisse authentifiée. AVANT le matcher ADMIN
+                // pour shadowing correct.
+                .requestMatchers(HttpMethod.GET, "/api/sync/status").authenticated()
                 // ETAPE 4 — endpoints de synchronisation local ↔ central.
                 // Stubs aujourd'hui ; destinés à être appelés par un démon, pas par les caissiers.
                 .requestMatchers("/api/sync/**").hasRole("ADMIN")
@@ -100,6 +107,10 @@ public class SecurityConfig {
             // pas de header Authorization), et jwt ne s'active qu'avec un header.
             .addFilterBefore(loginRateLimitFilter, UsernamePasswordAuthenticationFilter.class)
             .addFilterBefore(refreshRateLimitFilter, UsernamePasswordAuthenticationFilter.class)
+            // SyncRateLimitFilter AVANT JWT/SyncApiKey : on rate-limit même les
+            // requêtes non-authentifiées (un attaquant non-auth peut DoS le matcher).
+            // Coût négligeable (1 ConcurrentHashMap lookup).
+            .addFilterBefore(syncRateLimitFilter, UsernamePasswordAuthenticationFilter.class)
             .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)
             // SyncApiKeyFilter APRÈS JwtAuthFilter : si un appel arrive avec un JWT
             // valide, le contexte est déjà peuplé et le filtre ne fait rien. Sinon

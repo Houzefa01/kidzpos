@@ -9,6 +9,7 @@ import com.kidzpos.sync.SyncDtos.PullResponse;
 import com.kidzpos.sync.SyncDtos.PushOperation;
 import com.kidzpos.sync.SyncDtos.PushRequest;
 import com.kidzpos.sync.SyncDtos.PushResponse;
+import com.kidzpos.sync.SyncDtos.SyncStatusResponse;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -154,18 +155,40 @@ public class SyncController {
      * Pull incrémental : retourne les événements de operation_log dont
      * created_at > since, en ordre chronologique croissant, plafonné à limit.
      *
-     * V18 — Filtre OPTIONNEL par storeId. Si le local fournit son magasin,
-     * le central ne retourne QUE les événements de ce magasin (isolation
-     * multi-magasin). Si absent : retourne tout (rétrocompat clients pré-V18).
+     * V18 — Filtre par storeId. Si le local fournit son magasin, le central ne
+     * retourne QUE les événements de ce magasin (isolation multi-magasin).
+     *
+     * <p><b>Audit-2026-05</b> — En mode per-store (auth via {@link SyncApiKeyFilter}
+     * avec clé V21), {@code storeId} est OBLIGATOIRE et doit match le storeId de
+     * la clé. Empêche un store compromis (clé volée) de demander les events de
+     * tous les magasins en omettant simplement le paramètre. Si {@code storeId}
+     * est fourni mais diffère du storeId du principal → 403 strict.
+     *
+     * <p>Mode ADMIN-JWT ou legacy (clé partagée) : {@code storeId} reste optionnel
+     * (admin omnipotent / legacy bypass — backward compat).
      *
      * since   : null = premier pull (renvoie tout depuis le début, plafonné).
-     * storeId : null = pas de filtre magasin (rétrocompat). Sinon : filtre strict.
+     * storeId : obligatoire en per-store ; optionnel en ADMIN/legacy.
      * limit   : clampé entre 1 et 500 (anti-DoS).
      */
     @GetMapping("/pull")
     public ResponseEntity<PullResponse> pull(@RequestParam(required = false) Instant since,
                                              @RequestParam(required = false) String storeId,
-                                             @RequestParam(required = false, defaultValue = "100") int limit) {
+                                             @RequestParam(required = false, defaultValue = "100") int limit,
+                                             @AuthenticationPrincipal Object principal) {
+        // V21-pull-guard : en mode per-store, le storeId doit être fourni et match.
+        if (principal instanceof SyncPrincipal sp && sp.perStore() && sp.storeId() != null) {
+            if (storeId == null || storeId.isBlank()) {
+                log.warn("[sync] pull rejected: per-store auth (store={}) but no storeId query param",
+                        sp.storeId());
+                return ResponseEntity.status(400).body(new PullResponse(List.of(), false));
+            }
+            if (!sp.storeId().equals(storeId)) {
+                log.warn("[sync] cross-store pull rejected: authenticated store={} requested store={}",
+                        sp.storeId(), storeId);
+                return ResponseEntity.status(403).body(new PullResponse(List.of(), false));
+            }
+        }
         int safeLimit = Math.min(Math.max(1, limit), 500);
         var pageable = PageRequest.of(0, safeLimit);
         var pageableSorted = org.springframework.data.domain.PageRequest.of(0, safeLimit,
@@ -193,5 +216,36 @@ public class SyncController {
                 nodeId, since, storeId, ops.size(), hasMore);
 
         return ResponseEntity.ok(new PullResponse(ops, hasMore));
+    }
+
+    /**
+     * T15 — État de la sync (lag + backlog) pour le frontend.
+     *
+     * <p>Endpoint léger destiné à l'OfflineBanner : permet d'afficher
+     * "X opérations en attente sur central — Y s de retard" plutôt que juste
+     * "online/offline". L'utilisateur sait s'il peut éteindre sans risque, ou
+     * s'il faut attendre que le push se vide.
+     *
+     * <p>Côté central : pendingCount lit operation_log.synced=false (qui devrait
+     * être 0 vu que push marque synced=true). Côté store : lit le vrai backlog.
+     *
+     * <p>oldestPending : ISO timestamp de l'event le plus ancien non syncé
+     * (NULL si rien à pousser). lagSeconds = age(oldestPending) côté serveur,
+     * cohérent avec la métrique Prometheus kidzpos_sync_lag_seconds.
+     */
+    @GetMapping("/status")
+    public ResponseEntity<SyncStatusResponse> status() {
+        long pending = repo.countBySyncedFalse();
+        var oldest = repo.findFirstBySyncedFalseOrderByCreatedAtAsc();
+        long lagSeconds = oldest
+                .map(o -> Math.max(0L, Instant.now().getEpochSecond() - o.getCreatedAt().getEpochSecond()))
+                .orElse(0L);
+        return ResponseEntity.ok(new SyncStatusResponse(
+                nodeRole,
+                nodeId,
+                pending,
+                oldest.map(o -> o.getCreatedAt()).orElse(null),
+                lagSeconds
+        ));
     }
 }

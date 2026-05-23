@@ -52,9 +52,9 @@ public class ProductController {
                                   @AuthenticationPrincipal AuthPrincipal me) {
         var deny = StoreAccessGuard.denyIfCrossStore(me, storeId);
         if (deny != null) return deny;
-        // V19-audit — Sur nœud store-scoped, on FORCE le storeId du nœud quoi qu'on
-        // demande (ignore storeId=null pour ADMIN). Empêche toute fuite cross-store
-        // via les listings, même en cas de DB pollée par un bug de sync.
+        // V22 — ADMIN omnipotent (voit le storeId demandé ou tous si null) ;
+        // EMPLOYEE strictement contraint à son storeId via le JWT (cf JavaDoc
+        // de StoreAccessGuard#enforceStoreScope pour la politique complète).
         String scope = StoreAccessGuard.enforceStoreScope(storeId, me, nodeContext);
         var products = scope == null ? repo.findAll() : repo.findByStoreId(scope);
         String etag = collectionEtag(products);

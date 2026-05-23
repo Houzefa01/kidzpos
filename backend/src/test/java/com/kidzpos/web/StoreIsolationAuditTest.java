@@ -25,11 +25,16 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * V19-audit — Tests d'intégration d'isolation multi-magasin.
+ * V19-audit / V22 — Tests d'intégration d'isolation multi-magasin.
  *
- * Vérifie qu'un nœud configuré pour le magasin S1 ne peut :
- *   - lister, lire, modifier, supprimer aucune donnée du magasin S2
- *   - vendre, ajuster stock, ou créer client référençant un produit/client S2
+ * Politique (V22) : <strong>ADMIN omnipotent partout</strong>. Un ADMIN connecté
+ * à n'importe quel nœud peut lire/écrire les données de tout magasin (utile pour
+ * support et debug en prod). En revanche, un EMPLOYEE est strictement contraint
+ * à son storeId (via le JWT, pas le nœud).
+ *
+ * Couvre :
+ *   - ADMIN : accès cross-store autorisé (listings + read-by-id + transfer)
+ *   - EMPLOYEE : isolation stricte sur son storeId (cross-store → 404, listings filtrés)
  *
  * Utilise TestContainers Postgres (cf {@link IntegrationTestBase}) et override
  * le bean {@link NodeContext} pour simuler le nœud S1.
@@ -94,37 +99,40 @@ class StoreIsolationAuditTest extends IntegrationTestBase {
                 .build();
     }
 
-    // ─── 1) LISTING : un nœud s1 ne voit JAMAIS les produits/ventes/movements de s2 ───
+    // ─── 1) LISTING : ADMIN voit tout, EMPLOYEE strictement filtré ───
 
     @Test
-    void productList_onStoreScopedNode_filtersToOwnStore() {
-        authenticate("u-adm", "ADMIN", null);  // même ADMIN, ne doit pas voir s2
+    void productList_adminWithoutStoreId_seesAllStores() {
+        authenticate("u-adm", "ADMIN", null);
+        // Politique V22 : ADMIN sans filtre voit les produits de tous les magasins.
         ResponseEntity<?> res = productController.list(null, null, currentPrincipal());
         assertThat(res.getStatusCode()).isEqualTo(HttpStatus.OK);
         @SuppressWarnings("unchecked")
         List<Product> body = (List<Product>) res.getBody();
-        assertThat(body).extracting(Product::getStoreId).containsOnly("s1");
+        assertThat(body).extracting(Product::getStoreId).contains("s1", "s2");
     }
 
     @Test
-    void productList_adminRequestingS2_silentlyForced_toS1() {
+    void productList_adminRequestingS2_returnsS2Products() {
         authenticate("u-adm", "ADMIN", null);
-        // Même si l'admin demande explicitement storeId=s2, enforceStoreScope force s1.
+        // Politique V22 : ADMIN obtient ce qu'il demande (pas de scope forcé).
         ResponseEntity<?> res = productController.list("s2", null, currentPrincipal());
         assertThat(res.getStatusCode()).isEqualTo(HttpStatus.OK);
         @SuppressWarnings("unchecked")
         List<Product> body = (List<Product>) res.getBody();
-        assertThat(body).noneMatch(p -> "s2".equals(p.getStoreId()));
+        assertThat(body).extracting(Product::getStoreId).containsOnly("s2");
     }
 
-    // ─── 2) READ BY ID : 404 si l'entité appartient à un autre store ───
+    // ─── 2) READ BY ID : ADMIN peut lire cross-store, EMPLOYEE → 404 ───
 
     @Test
-    void productGetOne_crossStore_returns404NotForbidden() {
+    void productGetOne_crossStoreByAdmin_returnsProduct() {
         authenticate("u-adm", "ADMIN", null);
         ResponseEntity<Product> res = productController.getOne("p-s2", currentPrincipal());
-        // 404 (pas 403) — défense anti-énumération.
-        assertThat(res.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        // Politique V22 : ADMIN omnipotent → 200 même si entité hors nœud.
+        assertThat(res.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(res.getBody()).isNotNull();
+        assertThat(res.getBody().getStoreId()).isEqualTo("s2");
     }
 
     @Test
@@ -168,16 +176,18 @@ class StoreIsolationAuditTest extends IntegrationTestBase {
         assertThat(customers.findById("c-s2").orElseThrow().getPoints()).isEqualTo(100);
     }
 
-    // ─── 4) STOCK : transfer source doit appartenir au nœud ───
+    // ─── 4) STOCK : transfer cross-store autorisé pour ADMIN ───
 
     @Test
-    void stockTransfer_sourceProductS2_returns404() {
+    void stockTransfer_crossStoreByAdmin_succeeds() {
         authenticate("u-adm", "ADMIN", null);
+        // Politique V22 : ADMIN omnipotent peut orchestrer un transfer
+        // depuis un produit s2 vers s1 même depuis un nœud rattaché à s1.
         var req = new TransferReq("p-s2", "s1", 1, "client-mv-1");
         ResponseEntity<?> res = stockController.transfer(req, currentPrincipal());
-        assertThat(res.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
-        // Stock du produit source intact.
-        assertThat(products.findById("p-s2").orElseThrow().getStock()).isEqualTo(10);
+        assertThat(res.getStatusCode().is2xxSuccessful()).isTrue();
+        // Stock du produit source décrémenté de 1.
+        assertThat(products.findById("p-s2").orElseThrow().getStock()).isEqualTo(9);
     }
 
     // ─── 5) CUSTOMERS : listing isolé ───

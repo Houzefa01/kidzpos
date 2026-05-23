@@ -40,6 +40,17 @@ public class Sale {
     private Double change;
     private String refundedFrom;
 
+    /**
+     * V22 — UUID stable côté client pour l'idempotence du refund. Si fourni au
+     * {@code POST /api/sales/refund} et déjà connu côté serveur, la requête
+     * retourne le refund existant au lieu d'en créer un nouveau. Évite le
+     * double-remboursement en cas de retry réseau ou de replay outbox.
+     * NULL pour les lignes pré-V22 et pour les checkout (jamais alimenté côté
+     * vente initiale).
+     */
+    @Column(name = "client_refund_id", length = 64, unique = true)
+    private String clientRefundId;
+
     /** Devise affichée au client lors de la vente ("AR" ou "EUR"), figée au checkout.
      *  Les montants (subtotal, total, amountPaid…) sont stockés en Ariary canonique
      *  (cf V5) ; ce champ sert au rendu du reçu/historique avec la devise d'origine

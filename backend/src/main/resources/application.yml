@@ -113,6 +113,21 @@ kidzpos:
     #   cookie-same-site : Lax (LAN), Strict (prod same-origin), None (cross-origin HTTPS)
     cookie-secure: ${KIDZPOS_AUTH_COOKIE_SECURE:false}
     cookie-same-site: ${KIDZPOS_AUTH_COOKIE_SAME_SITE:Lax}
+  # ─── Rate limiting (T5) ───────────────────────────────────────────────────
+  # Calibrable sans recompile. Defaults conservatifs pour LAN mono-backend.
+  # En multi-instance, migrer vers un store partagé (Redis/bucket4j-redis).
+  ratelimit:
+    login:
+      limit: ${KIDZPOS_RATELIMIT_LOGIN_LIMIT:5}
+      window-ms: ${KIDZPOS_RATELIMIT_LOGIN_WINDOW_MS:300000}      # 5 min
+    refresh:
+      limit: ${KIDZPOS_RATELIMIT_REFRESH_LIMIT:10}
+      window-ms: ${KIDZPOS_RATELIMIT_REFRESH_WINDOW_MS:60000}     # 1 min
+    sync:
+      # Push 30s × batch 200 ops = ~2 req/min ; 120 req/min laisse une marge
+      # confortable pour les bursts et le pull paginé.
+      limit: ${KIDZPOS_RATELIMIT_SYNC_LIMIT:120}
+      window-ms: ${KIDZPOS_RATELIMIT_SYNC_WINDOW_MS:60000}        # 1 min
   cors:
     # Patterns autorisés (localhost + IPs LAN privées sur ports Vite/preview, HTTP + HTTPS).
     # ⚠️ En prod derrière Caddy/nginx HTTPS : exporter CORS_ALLOWED_ORIGINS=https://kidzpos.monshop.com
@@ -120,6 +135,12 @@ kidzpos:
   exchange:
     # Taux EUR -> Ariary par défaut (mis à jour si internet via /api/exchange/refresh)
     eur-to-ar-default: 4900
+  # ─── Listings cap (T3 — audit-2026-05) ────────────────────────────────────
+  # GET /api/sales sans `?page=` retourne max N ventes (date DESC). Au-delà,
+  # le client DOIT paginer. Protège contre le runaway "100k ventes = 100 Mo
+  # JSON = OOM frontend". 2000 = ~6 mois pour un magasin moyen.
+  sales:
+    list-default-cap: ${KIDZPOS_SALES_LIST_DEFAULT_CAP:2000}
   # ─── Synchronisation local ↔ central ───────────────────────────────────────
   # Par défaut DÉSACTIVÉE → SyncPushService + SyncScheduler ne sont même pas
   # instanciés (cf @ConditionalOnProperty). Le central, lui, accepte les push

@@ -21,6 +21,7 @@ public class BusinessMetrics {
 
     public final Counter stockIdempotentReplay;
     public final Counter saleIdempotentReplay;
+    public final Counter refundIdempotentReplay;
     public final Counter saleSeqRetry;
     public final Counter optimisticLockConflict;
     public final Counter loginRateLimited;
@@ -47,6 +48,9 @@ public class BusinessMetrics {
                 .register(registry);
         this.saleIdempotentReplay = Counter.builder("kidzpos.sale.idempotent_replay")
                 .description("Ventes court-circuitées car clientSaleId déjà appliqué")
+                .register(registry);
+        this.refundIdempotentReplay = Counter.builder("kidzpos.refund.idempotent_replay")
+                .description("V22 — Refunds court-circuités car clientRefundId déjà appliqué")
                 .register(registry);
         this.saleSeqRetry = Counter.builder("kidzpos.sale.seq_retry")
                 .description("Retries sur collision uk_sale_store_seq")

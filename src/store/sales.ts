@@ -162,7 +162,13 @@ export const useSales = create<SalesState>()((set, get) => ({
         0
       );
     }
-    void pushMutation("/api/sales/refund", "POST", { saleId: id }, `refund:${id}`);
+    // V22 — clientRefundId : UUID stable côté client pour l'idempotence du refund
+    // au replay outbox (réseau coupé en plein POST → retry → double-remboursement
+    // sinon). Le backend renvoie le refund existant si déjà connu.
+    void pushMutation("/api/sales/refund", "POST", {
+      saleId: id,
+      clientRefundId: refund.id,
+    }, `refund:${id}`);
     return { ok: true, refund };
   },
 

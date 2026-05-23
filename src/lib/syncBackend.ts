@@ -172,7 +172,6 @@ export async function hydrateFromBackend(): Promise<{ ok: boolean; error?: strin
 
     for (const f of failures) {
       const r = f.result as { ok: false; status?: number; error: string };
-      // eslint-disable-next-line no-console
       console.warn(`[hydrate] /${f.resource} a échoué (status=${r.status ?? "n/a"}): ${r.error}`);
     }
 

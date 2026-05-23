@@ -88,7 +88,13 @@ class RefundConcurrencyTest extends IntegrationTestBase {
                 try {
                     start.await();
                     authenticate("admin-" + idx, "ADMIN", null);
-                    var res = saleController.refund(new RefundReq(saleId), currentPrincipal());
+                    // V22 — clientRefundId distinct par tentative pour exercer la
+                    // course sur uk_sales_client_refund_id séparément de l'idempotence
+                    // (testée dans RefundIdempotencyTest). Ici on ne veut tester QUE
+                    // l'invariant historique : 1 seul refund pour la même vente.
+                    var res = saleController.refund(
+                            new RefundReq(saleId, "thread-" + idx + "-" + java.util.UUID.randomUUID()),
+                            currentPrincipal());
                     if (res.getStatusCode().is2xxSuccessful()) ok.incrementAndGet();
                     else rejected.incrementAndGet();
                 } catch (Exception e) {
